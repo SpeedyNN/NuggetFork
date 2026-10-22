@@ -209,13 +209,18 @@ object RemainingSlayerKills {
 
     private fun getMobs(): List<Mob>? {
         val data = data ?: return null
-        val areas = data.normalMobs[SlayerApi.currentAreaType] ?: mapOf()
+        val slayerType = SlayerApi.currentAreaType ?: SlayerApi.activeType ?: SlayerType.SVEN
+        val areas = data.normalMobs[slayerType] ?: mapOf()
         val normalMobs = areas[SkyBlockUtils.graphArea]
-            ?: if (IslandType.THE_PARK.isInIsland()) areas["Howling Cave"] ?: listOf() else listOf()
+            ?: areas["Howling Cave"]
+            ?: areas.values.firstOrNull()
+            ?: listOf()
 
         return buildList {
             addAll(normalMobs)
-            data.miniBosses[SlayerApi.activeType]?.get(SlayerApi.tier.toString())?.let {
+            val type = SlayerApi.activeType ?: slayerType
+            val tier = if (SlayerApi.tier > 0) SlayerApi.tier else 4
+            data.miniBosses[type]?.get(tier.toString())?.let {
                 addAll(it)
             }
         }
@@ -368,7 +373,7 @@ object RemainingSlayerKills {
         RenderDisplayHelper(
             outsideInventory = true,
             inOwnInventory = true,
-            condition = { isEnabled() && SlayerApi.isInCorrectArea },
+            condition = { isEnabled() && (SlayerApi.isShowEverywhere() || SlayerApi.isInCorrectArea) },
             onRender = {
                 config.remainingKillsPosition.renderRenderables(display, posLabel = "Remaining Slayer Kills")
             },

@@ -15,7 +15,7 @@ object ScoreboardElementSlayer : ScoreboardElement() {
         add(SlayerApi.latestProgress)
     }
 
-    override fun showWhen() = if (informationFilteringConfig.hideIrrelevantLines) SlayerApi.isInCorrectArea else true
+    override fun showWhen() = if (SlayerApi.isShowEverywhere()) true else if (informationFilteringConfig.hideIrrelevantLines) SlayerApi.isInCorrectArea else true
 
     override val configLine = "Slayer Quest\n §7- §cVoidgloom Seraph III\n §7- §e12§7/§c120 §7Kills"
 

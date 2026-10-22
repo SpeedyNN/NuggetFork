@@ -176,7 +176,12 @@ object SlayerRngMeterDisplay {
         }
     }
 
-    private fun getCurrentSlayer() = SlayerApi.latestCategory.removeWordsAtEnd(1).removeColor()
+    private fun getCurrentSlayer(): String {
+        val cat = SlayerApi.latestCategory.ifEmpty {
+            ProfileStorageData.profileSpecific?.slayerRngMeter?.keys?.lastOrNull() ?: "Sven Packmaster IV"
+        }
+        return cat.removeWordsAtEnd(1).removeColor()
+    }
 
     @HandleEvent
     fun onInventoryFullyOpened(event: InventoryFullyOpenedEvent) {
@@ -256,7 +261,7 @@ object SlayerRngMeterDisplay {
     fun drawDisplay(): String {
         val storage = getStorage() ?: return ""
 
-        if (SlayerApi.latestCategory.let { it.endsWith(" I") || it.endsWith(" II") }) {
+        if (!SlayerApi.isShowEverywhere() && SlayerApi.latestCategory.let { it.endsWith(" I") || it.endsWith(" II") }) {
             return ""
         }
 
@@ -293,6 +298,7 @@ object SlayerRngMeterDisplay {
 
     private fun shouldShowDisplay(): Boolean {
         if (!isEnabled()) return false
+        if (SlayerApi.isShowEverywhere()) return true
         if (!SlayerApi.isInCorrectArea) return false
         if (!SlayerApi.hasActiveQuest()) return false
 

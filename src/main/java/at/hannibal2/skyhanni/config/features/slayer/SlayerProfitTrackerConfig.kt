@@ -61,6 +61,15 @@ class SlayerProfitTrackerConfig {
     @ConfigEditorBoolean
     val svenEverywhereInPark: Property<Boolean> = Property.of(true)
 
+    // TODO move out of slayer profit tracker and into the generic slayer config.
+    @Expose
+    @ConfigOption(
+        name = "Show Everywhere",
+        desc = "Show all Slayer GUI elements anywhere at any time, bypassing all area requirements.",
+    )
+    @ConfigEditorBoolean
+    val showEverywhere: Property<Boolean> = Property.of(true)
+
     @Expose
     @ConfigOption(
         name = "Tracker Settings",

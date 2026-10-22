@@ -224,8 +224,10 @@ object SlayerApi {
         }
     }
 
+    fun isShowEverywhere(): Boolean = config.showEverywhere.get() || trackerConfig.showEverywhere.get()
+
     private fun updateArea() {
-        if (SkyBlockUtils.isStrandedProfile) {
+        if (isShowEverywhere() || SkyBlockUtils.isStrandedProfile) {
             isInAnyArea = true
             isInCorrectArea = true
         } else {
@@ -389,10 +391,14 @@ object SlayerApi {
     @HandleEvent
     private fun onConfigLoad() {
         with(trackerConfig) {
-            ConditionalUtils.onToggle(revenantInGraveyard, voidgloomInNest, voidgloomInNoArea, svenEverywhereInPark) {
+            ConditionalUtils.onToggle(revenantInGraveyard, voidgloomInNest, voidgloomInNoArea, svenEverywhereInPark, showEverywhere) {
                 currentAreaType = checkTypeForCurrentArea()
                 updateArea()
             }
+        }
+        ConditionalUtils.onToggle(config.showEverywhere) {
+            currentAreaType = checkTypeForCurrentArea()
+            updateArea()
         }
     }
 
@@ -417,6 +423,9 @@ object SlayerApi {
 
     // TODO USE SH-REPO
     private fun checkTypeForCurrentArea(): Type? {
+        if (isShowEverywhere()) {
+            return activeType ?: Type.SVEN
+        }
         if (trackerConfig.svenEverywhereInPark.get() && IslandType.THE_PARK.isInIsland()) return Type.SVEN
         return when (SkyBlockUtils.graphArea) {
         "Graveyard" -> if (trackerConfig.revenantInGraveyard.get() && IslandType.HUB.isInIsland()) Type.REVENANT else null

@@ -24,6 +24,14 @@ import io.github.notenoughupdates.moulconfig.observer.Property
 class SlayerConfig {
 
     @Expose
+    @ConfigOption(
+        name = "Show Slayer GUI Everywhere",
+        desc = "Show all Slayer GUI elements (Profit Tracker, Remaining Kills, RNG Meter, etc.) anywhere at any time, bypassing all area requirements.",
+    )
+    @ConfigEditorBoolean
+    val showEverywhere: Property<Boolean> = Property.of(true)
+
+    @Expose
     @ConfigOption(name = "Zombie", desc = "")
     @Accordion
     val zombie: ZombieConfig = ZombieConfig()

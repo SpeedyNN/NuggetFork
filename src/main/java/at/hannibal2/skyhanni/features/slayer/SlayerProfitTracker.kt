@@ -1,4 +1,4 @@
-package at.hannibal2.skyhanni.features.slayer
+﻿package at.hannibal2.skyhanni.features.slayer
 
 import at.hannibal2.skyhanni.api.event.HandleEvent
 import at.hannibal2.skyhanni.config.ConfigUpdaterMigrator
@@ -6,6 +6,7 @@ import at.hannibal2.skyhanni.config.commands.CommandCategory
 import at.hannibal2.skyhanni.config.commands.CommandRegistrationEvent
 import at.hannibal2.skyhanni.config.storage.ProfileSpecificStorage
 import at.hannibal2.skyhanni.data.ItemAddManager
+import at.hannibal2.skyhanni.data.ProfileStorageData
 import at.hannibal2.skyhanni.data.SlayerApi
 import at.hannibal2.skyhanni.data.jsonobjects.repo.SlayerProfitTrackerItemsJson
 import at.hannibal2.skyhanni.events.ItemAddEvent
@@ -43,7 +44,16 @@ object SlayerProfitTracker {
     private val config get() = SlayerApi.config.itemProfitTracker
 
     private var category = ""
-    private val categoryName get() = ReplaceRomanNumerals.replaceLine(category)
+    private var lastCategory = ""
+
+    private fun getEffectiveCategory(): String {
+        if (category != "") return category
+        if (SlayerApi.latestCategory != "") return SlayerApi.latestCategory
+        if (lastCategory != "") return lastCategory
+        return ProfileStorageData.profileSpecific?.slayerProfitData?.keys?.lastOrNull() ?: "Sven Packmaster IV"
+    }
+
+    private val categoryName get() = ReplaceRomanNumerals.replaceLine(getEffectiveCategory())
     private var baseSlayerType = ""
     private val trackers = mutableMapOf<String, SkyHanniItemTracker<Data>>()
 
@@ -98,7 +108,7 @@ object SlayerProfitTracker {
     fun onPurseChange(event: PurseChangeEvent) {
         if (!isEnabled()) return
         val coins = event.coins
-        if (event.reason == PurseChangeCause.GAIN_MOB_KILL && SlayerApi.isInCorrectArea) {
+        if (event.reason == PurseChangeCause.GAIN_MOB_KILL && (SlayerApi.isShowEverywhere() || SlayerApi.isInCorrectArea)) {
             if (coins >= 100000) {
                 ChatUtils.debug("Mob kill coin gain too high! Ignoring!")
                 return
@@ -127,22 +137,28 @@ object SlayerProfitTracker {
     @HandleEvent
     fun onSlayerChange(event: SlayerChangeEvent) {
         val newSlayer = event.newSlayer
+        if (newSlayer.isNotEmpty()) {
+            lastCategory = newSlayer.removeColor()
+        }
         category = newSlayer.removeColor()
-        baseSlayerType = category.substringBeforeLast(" ")
+        val cat = getEffectiveCategory()
+        baseSlayerType = cat.substringBeforeLast(" ", cat)
         getTracker()?.update()
     }
 
     private fun getTracker(): SkyHanniItemTracker<Data>? {
-        if (category == "") return null
+        val cat = getEffectiveCategory()
+        if (cat == "") return null
 
-        return trackers.getOrPut(category) {
+        val displayName = ReplaceRomanNumerals.replaceLine(cat)
+        return trackers.getOrPut(cat) {
             val getStorage: (ProfileSpecificStorage) -> Data = {
                 it.slayerProfitData.getOrPut(
-                    category,
+                    cat,
                 ) { Data() }
             }
             SkyHanniItemTracker(
-                "$categoryName Profit Tracker",
+                "$displayName Profit Tracker",
                 ::Data,
                 getStorage,
                 trackerConfig = { config.perTrackerConfig }
@@ -161,8 +177,8 @@ object SlayerProfitTracker {
     fun onItemAdd(event: ItemAddEvent) {
         // TODO remove is config enabled check for tracker
         if (!isEnabled()) return
-        if (!SlayerApi.isInCorrectArea) return
-        if (!SlayerApi.hasActiveQuest()) return
+        if (!SlayerApi.isShowEverywhere() && !SlayerApi.isInCorrectArea) return
+        if (!SlayerApi.isShowEverywhere() && !SlayerApi.hasActiveQuest()) return
 
         tryAddItem(event.internalName, event.amount, event.source == ItemAddManager.Source.COMMAND)
     }
@@ -237,7 +253,7 @@ object SlayerProfitTracker {
         )
     }
 
-    private fun shouldShowDisplay(): Boolean = isEnabled() && SlayerApi.isInCorrectArea
+    private fun shouldShowDisplay(): Boolean = isEnabled() && (SlayerApi.isShowEverywhere() || SlayerApi.isInCorrectArea)
 
     @HandleEvent
     fun onConfigFix(event: ConfigUpdaterMigrator.ConfigFixEvent) {
@@ -281,6 +297,17 @@ object SlayerProfitTracker {
             description = "Resets the total slayer profit for the current slayer type"
             category = CommandCategory.USERS_RESET
             simpleCallback(::resetCommand)
+        }
+        event.registerBrigadier("shtoggleslayergui") {
+            description = "Toggles showing all Slayer GUI elements everywhere"
+            category = CommandCategory.USERS_ACTIVE
+            simpleCallback {
+                val current = SlayerApi.isShowEverywhere()
+                SlayerApi.config.showEverywhere.set(!current)
+                config.showEverywhere.set(!current)
+                val state = if (!current) "§aENABLED" else "§cDISABLED"
+                ChatUtils.chat("§eSlayer GUI everywhere is now $state§e.")
+            }
         }
     }
 }
