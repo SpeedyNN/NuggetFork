@@ -52,6 +52,15 @@ class SlayerProfitTrackerConfig {
     @ConfigEditorBoolean
     val revenantInGraveyard: Property<Boolean> = Property.of(true)
 
+    // TODO move out of slayer profit tracker and into the generic slayer config.
+    @Expose
+    @ConfigOption(
+        name = "Sven Everywhere In The Park",
+        desc = "Show all Wolf Slayer Features while anywhere on The Park island.",
+    )
+    @ConfigEditorBoolean
+    val svenEverywhereInPark: Property<Boolean> = Property.of(true)
+
     @Expose
     @ConfigOption(
         name = "Tracker Settings",

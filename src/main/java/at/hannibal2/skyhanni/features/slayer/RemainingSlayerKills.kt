@@ -4,9 +4,11 @@ import at.hannibal2.skyhanni.SkyHanniMod
 import at.hannibal2.skyhanni.api.event.HandleEvent
 import at.hannibal2.skyhanni.api.pet.CurrentPetApi
 import at.hannibal2.skyhanni.data.ElectionApi
+import at.hannibal2.skyhanni.data.IslandType
 import at.hannibal2.skyhanni.data.SlayerApi
 import at.hannibal2.skyhanni.data.hypixel.chat.event.SystemMessageEvent
 import at.hannibal2.skyhanni.data.model.SkyblockStat
+import at.hannibal2.skyhanni.events.IslandChangeEvent
 import at.hannibal2.skyhanni.events.ProfileJoinEvent
 import at.hannibal2.skyhanni.events.RepositoryReloadEvent
 import at.hannibal2.skyhanni.events.slayer.SlayerProgressChangeEvent
@@ -151,6 +153,12 @@ object RemainingSlayerKills {
     }
 
     @HandleEvent
+    fun onIslandChange(event: IslandChangeEvent) {
+        if (!isEnabled()) return
+        update()
+    }
+
+    @HandleEvent
     private fun onSystemMessage(event: SystemMessageEvent.Allow) {
         val message = event.cleanMessage
         if (comboExpiredPattern.matches(message)) {
@@ -202,7 +210,8 @@ object RemainingSlayerKills {
     private fun getMobs(): List<Mob>? {
         val data = data ?: return null
         val areas = data.normalMobs[SlayerApi.currentAreaType] ?: mapOf()
-        val normalMobs = areas[SkyBlockUtils.graphArea] ?: listOf()
+        val normalMobs = areas[SkyBlockUtils.graphArea]
+            ?: if (IslandType.THE_PARK.isInIsland()) areas["Howling Cave"] ?: listOf() else listOf()
 
         return buildList {
             addAll(normalMobs)

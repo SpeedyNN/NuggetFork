@@ -6,6 +6,7 @@ import at.hannibal2.skyhanni.data.model.TabWidget
 import at.hannibal2.skyhanni.events.DebugDataCollectEvent
 import at.hannibal2.skyhanni.events.ScoreboardUpdateEvent
 import at.hannibal2.skyhanni.events.WidgetUpdateEvent
+import at.hannibal2.skyhanni.events.IslandChangeEvent
 import at.hannibal2.skyhanni.events.chat.SkyHanniChatEvent
 import at.hannibal2.skyhanni.events.slayer.SlayerChangeEvent
 import at.hannibal2.skyhanni.events.slayer.SlayerProgressChangeEvent
@@ -388,7 +389,7 @@ object SlayerApi {
     @HandleEvent
     private fun onConfigLoad() {
         with(trackerConfig) {
-            ConditionalUtils.onToggle(revenantInGraveyard, voidgloomInNest, voidgloomInNoArea) {
+            ConditionalUtils.onToggle(revenantInGraveyard, voidgloomInNest, voidgloomInNoArea, svenEverywhereInPark) {
                 currentAreaType = checkTypeForCurrentArea()
                 updateArea()
             }
@@ -408,8 +409,16 @@ object SlayerApi {
         SlayerStateChangeEvent(NO_ACTIVE_QUEST).post()
     }
 
+    @HandleEvent(priority = HandleEvent.LOW)
+    fun onIslandChange(event: IslandChangeEvent) {
+        currentAreaType = checkTypeForCurrentArea()
+        updateArea()
+    }
+
     // TODO USE SH-REPO
-    private fun checkTypeForCurrentArea() = when (SkyBlockUtils.graphArea) {
+    private fun checkTypeForCurrentArea(): Type? {
+        if (trackerConfig.svenEverywhereInPark.get() && IslandType.THE_PARK.isInIsland()) return Type.SVEN
+        return when (SkyBlockUtils.graphArea) {
         "Graveyard" -> if (trackerConfig.revenantInGraveyard.get() && IslandType.HUB.isInIsland()) Type.REVENANT else null
         "Revenant Cave", "Crypts" -> Type.REVENANT
 
@@ -442,6 +451,7 @@ object SlayerApi {
         -> Type.VAMPIRE
 
         else -> null
+    }
     }
 
     private enum class SlayerLinesSource {
