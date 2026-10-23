@@ -1,4 +1,4 @@
-﻿package at.hannibal2.skyhanni.features.slayer
+package at.hannibal2.skyhanni.features.slayer
 
 import at.hannibal2.skyhanni.api.event.HandleEvent
 import at.hannibal2.skyhanni.config.ConfigUpdaterMigrator
@@ -304,7 +304,7 @@ object SlayerProfitTracker {
             simpleCallback {
                 val current = SlayerApi.isShowEverywhere()
                 SlayerApi.config.showEverywhere.set(!current)
-                config.showEverywhere.set(!current)
+
                 val state = if (!current) "§aENABLED" else "§cDISABLED"
                 ChatUtils.chat("§eSlayer GUI everywhere is now $state§e.")
             }

@@ -29,7 +29,7 @@ class SlayerConfig {
         desc = "Show all Slayer GUI elements (Profit Tracker, Remaining Kills, RNG Meter, etc.) anywhere at any time, bypassing all area requirements.",
     )
     @ConfigEditorBoolean
-    val showEverywhere: Property<Boolean> = Property.of(true)
+    val showEverywhere: Property<Boolean> = Property.of(false)
 
     @Expose
     @ConfigOption(name = "Zombie", desc = "")

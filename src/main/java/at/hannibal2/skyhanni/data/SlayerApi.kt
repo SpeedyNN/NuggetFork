@@ -224,7 +224,7 @@ object SlayerApi {
         }
     }
 
-    fun isShowEverywhere(): Boolean = config.showEverywhere.get() || trackerConfig.showEverywhere.get()
+    fun isShowEverywhere(): Boolean = config.showEverywhere.get()
 
     private fun updateArea() {
         if (isShowEverywhere() || SkyBlockUtils.isStrandedProfile) {
@@ -391,7 +391,7 @@ object SlayerApi {
     @HandleEvent
     private fun onConfigLoad() {
         with(trackerConfig) {
-            ConditionalUtils.onToggle(revenantInGraveyard, voidgloomInNest, voidgloomInNoArea, svenEverywhereInPark, showEverywhere) {
+            ConditionalUtils.onToggle(revenantInGraveyard, voidgloomInNest, voidgloomInNoArea, svenEverywhereInPark) {
                 currentAreaType = checkTypeForCurrentArea()
                 updateArea()
             }

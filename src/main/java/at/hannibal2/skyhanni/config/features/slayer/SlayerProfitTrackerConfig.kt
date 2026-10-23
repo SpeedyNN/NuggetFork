@@ -20,7 +20,6 @@ class SlayerProfitTrackerConfig {
     @ConfigEditorBoolean
     @FeatureToggle
     var enabled: Boolean = true
-
     @Expose
     @ConfigLink(owner = SlayerProfitTrackerConfig::class, field = "enabled")
     val pos: Position = Position(20, 20)
@@ -60,15 +59,6 @@ class SlayerProfitTrackerConfig {
     )
     @ConfigEditorBoolean
     val svenEverywhereInPark: Property<Boolean> = Property.of(true)
-
-    // TODO move out of slayer profit tracker and into the generic slayer config.
-    @Expose
-    @ConfigOption(
-        name = "Show Everywhere",
-        desc = "Show all Slayer GUI elements anywhere at any time, bypassing all area requirements.",
-    )
-    @ConfigEditorBoolean
-    val showEverywhere: Property<Boolean> = Property.of(true)
 
     @Expose
     @ConfigOption(
