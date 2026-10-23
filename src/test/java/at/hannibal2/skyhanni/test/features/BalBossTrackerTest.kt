@@ -45,5 +45,29 @@ class BalBossTrackerTest {
         // 1 - (1 - 0.00045)^1000 ≈ 36.24%
         assertTrue(probAt1000 > 0.36 && probAt1000 < 0.37)
     }
+
+    @Test
+    fun `test epic and legendary individual probabilities`() {
+        val pEpic = BalBossTracker.BASE_EPIC_CHANCE
+        val pLeg = BalBossTracker.BASE_LEG_CHANCE
+
+        // Check exact ratios
+        assertEquals(0.000126, pEpic, 1e-9)
+        assertEquals(0.000054, pLeg, 1e-9)
+        assertEquals(0.00018, pEpic + pLeg, 1e-9)
+
+        // At 1000 hits without stats:
+        // Epic: 1 - (1 - 0.000126)^1000 ≈ 11.84%
+        val epicAt1k = BalBossTracker.calculateProbability(1000, pEpic)
+        assertTrue(epicAt1k > 0.118 && epicAt1k < 0.119)
+
+        // Legendary: 1 - (1 - 0.000054)^1000 ≈ 5.26%
+        val legAt1k = BalBossTracker.calculateProbability(1000, pLeg)
+        assertTrue(legAt1k > 0.052 && legAt1k < 0.053)
+
+        // At mean of Legendary (18,519 hits): ≈ 63.2%
+        val legAtMean = BalBossTracker.calculateProbability(18519, pLeg)
+        assertTrue(legAtMean > 0.63 && legAtMean < 0.64)
+    }
 }
 

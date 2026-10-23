@@ -59,6 +59,7 @@ import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.monster.cubemob.MagmaCube
 import net.minecraft.world.entity.projectile.arrow.Arrow
 import java.awt.Color
+import java.util.Locale
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -555,11 +556,11 @@ object BalBossTracker {
         updateBossBar()
     }
 
-    fun calculateEffectiveChance(): Double {
+    fun calculateEffectiveChance(baseChance: Double = BASE_TOTAL_CHANCE): Double {
         val mf = SkyblockStat.MAGIC_FIND.lastKnownValue ?: 0.0
         val pl = SkyblockStat.PET_LUCK.lastKnownValue ?: 0.0
         val statMultiplier = 1.0 + (mf + pl) / 100.0
-        return (BASE_TOTAL_CHANCE * statMultiplier).coerceIn(0.0, 1.0)
+        return (baseChance * statMultiplier).coerceIn(0.0, 1.0)
     }
 
     fun calculateProbability(n: Long, p: Double): Double {
@@ -629,10 +630,23 @@ object BalBossTracker {
     private fun update() {
         val mf = SkyblockStat.MAGIC_FIND.lastKnownValue ?: 0.0
         val pl = SkyblockStat.PET_LUCK.lastKnownValue ?: 0.0
-        val effectiveP = calculateEffectiveChance()
-        val prob = calculateProbability(hitsSinceLastPet, effectiveP)
-        val probFormatted = prob.formatPercentage()
-        val oneInN = if (effectiveP > 0.0) (1.0 / effectiveP).roundToLong() else 0L
+        val statMultiplier = 1.0 + (mf + pl) / 100.0
+
+        val effectiveTotalP = calculateEffectiveChance(BASE_TOTAL_CHANCE)
+        val effectiveEpicP = calculateEffectiveChance(BASE_EPIC_CHANCE)
+        val effectiveLegP = calculateEffectiveChance(BASE_LEG_CHANCE)
+
+        val probTotal = calculateProbability(hitsSinceLastPet, effectiveTotalP)
+        val probEpic = calculateProbability(hitsSinceLastPet, effectiveEpicP)
+        val probLeg = calculateProbability(hitsSinceLastPet, effectiveLegP)
+
+        val probTotalFormatted = probTotal.formatPercentage()
+        val probEpicFormatted = probEpic.formatPercentage()
+        val probLegFormatted = probLeg.formatPercentage()
+
+        val oneInNTotal = if (effectiveTotalP > 0.0) (1.0 / effectiveTotalP).roundToLong() else 0L
+        val oneInNEpic = if (effectiveEpicP > 0.0) (1.0 / effectiveEpicP).roundToLong() else 0L
+        val oneInNLeg = if (effectiveLegP > 0.0) (1.0 / effectiveLegP).roundToLong() else 0L
 
         val lines = buildList {
             add(Renderable.text("§6§lBal Boss Tracker"))
@@ -653,7 +667,39 @@ object BalBossTracker {
             }
 
             if (config.showHitsSinceLastPet) {
-                add(Renderable.text("§7Hits Since Pet: §e${hitsSinceLastPet.addSeparators()} §8(§b$probFormatted§8)"))
+                val hitLine = Renderable.text(
+                    "§7Hits Since Pet: §e${hitsSinceLastPet.addSeparators()} §8(§b$probTotalFormatted Any§8 · §6$probLegFormatted Leg§8)"
+                )
+                val hoverTooltip = listOf(
+                    "§6§lBal Pet Drop Odds & Cumulative Chances",
+                    "§7Hits since last pet: §e${hitsSinceLastPet.addSeparators()}",
+                    "",
+                    "§aCumulative Chances (so far):",
+                    "§7• Any Pet: §b$probTotalFormatted",
+                    "§7• Legendary: §6$probLegFormatted",
+                    "§7• Epic: §5$probEpicFormatted",
+                    "",
+                    "§aPer-Hit Chances (with stats):",
+                    "§7• Any Pet: §d1 in ${oneInNTotal.addSeparators()} §8(${"%.4f".format(Locale.US, effectiveTotalP * 100)}%)",
+                    "§7• Legendary: §61 in ${oneInNLeg.addSeparators()} §8(${"%.4f".format(Locale.US, effectiveLegP * 100)}%)",
+                    "§7• Epic: §51 in ${oneInNEpic.addSeparators()} §8(${"%.4f".format(Locale.US, effectiveEpicP * 100)}%)",
+                    "",
+                    "§aBase Rates:",
+                    "§7• Epic: §50.0126% §8(1 in 7,937)",
+                    "§7• Legendary: §60.0054% §8(1 in 18,519)",
+                    "§7• Any Pet: §d0.0180% §8(1 in 5,556)",
+                    "",
+                    "§aStats Applied:",
+                    "§7• Magic Find: §b+${mf.roundToInt()}",
+                    "§7• Pet Luck: §d+${pl.roundToInt()}",
+                    "§7• Stat Multiplier: §e${"%.2f".format(Locale.US, statMultiplier)}x",
+                )
+                add(Renderable.hoverTips(hitLine, hoverTooltip))
+            }
+
+            if (config.showRarityBreakdown) {
+                add(Renderable.text("  §8├ §5Epic: §e1/${oneInNEpic.addSeparators()} §8(§5$probEpicFormatted§8)"))
+                add(Renderable.text("  §8└ §6Leg: §e1/${oneInNLeg.addSeparators()} §8(§6$probLegFormatted§8)"))
             }
 
             if (config.showBossesSinceLastPet) {
@@ -670,8 +716,9 @@ object BalBossTracker {
             if (config.showDropOdds) {
                 val mfIcon = SkyblockStat.MAGIC_FIND.icon
                 val plIcon = SkyblockStat.PET_LUCK.icon
-                val chanceStr = if (oneInN > 0) "1/${oneInN.addSeparators()}" else "N/A"
-                add(Renderable.text("§7Pet Chance: §d$chanceStr §8(§b$mfIcon${mf.roundToInt()} §d$plIcon${pl.roundToInt()}§8)"))
+                val chanceStr = if (oneInNTotal > 0) "1/${oneInNTotal.addSeparators()}" else "N/A"
+                val multStr = "%.2f".format(Locale.US, statMultiplier)
+                add(Renderable.text("§7Pet Chance: §d$chanceStr §8(§b$mfIcon${mf.roundToInt()} §d$plIcon${pl.roundToInt()} §8• §e${multStr}x§8)"))
             }
         }
 

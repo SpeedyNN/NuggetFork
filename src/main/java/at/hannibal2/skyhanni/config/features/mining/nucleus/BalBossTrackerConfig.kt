@@ -57,6 +57,14 @@ class BalBossTrackerConfig {
     var showPetsDropped: Boolean = true
 
     @Expose
+    @ConfigOption(
+        name = "Show Rarity Breakdown",
+        desc = "Show separate drop odds and cumulative probabilities for Epic and Legendary Bal Pets.",
+    )
+    @ConfigEditorBoolean
+    var showRarityBreakdown: Boolean = true
+
+    @Expose
     @ConfigOption(name = "Show Drop Odds & Stats", desc = "Display current per-hit drop chance and relevant stats (Magic Find & Pet Luck).")
     @ConfigEditorBoolean
     var showDropOdds: Boolean = true
