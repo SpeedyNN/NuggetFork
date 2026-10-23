@@ -18,6 +18,7 @@ import at.hannibal2.skyhanni.events.entity.EntityHurtEvent
 import at.hannibal2.skyhanni.events.minecraft.packet.PacketSentEvent
 import at.hannibal2.skyhanni.events.player.ClickAction
 import at.hannibal2.skyhanni.events.player.PlayerInteractionEvent
+import at.hannibal2.skyhanni.features.combat.damageindicator.DamageIndicatorManager
 import at.hannibal2.skyhanni.skyhannimodule.SkyHanniModule
 import at.hannibal2.skyhanni.utils.AllEntitiesGetter
 import at.hannibal2.skyhanni.utils.ChatUtils
@@ -149,6 +150,11 @@ object BalBossTracker {
     private val balObtainedPattern by patternGroup.pattern(
         "bal.obtained",
         "(?:(?:§.)*\\[.*(?:§.)*\\+*(?:§.)*\\] )?(?<player>.*)§r§f §r§ehas obtained §r§a§r§7\\[Lvl 1\\] §r§(?<raritycolor>[65])Bal§r§e!",
+    )
+
+    private val balNearlyTherePattern by patternGroup.pattern(
+        "bal.nearlythere",
+        ".*Nearly there! The boss can't last much longer.*",
     )
 
     init {
@@ -379,12 +385,23 @@ object BalBossTracker {
     @HandleEvent(onlyOnIsland = IslandType.CRYSTAL_HOLLOWS)
     fun onEntityHurt(event: EntityHurtEvent<*>) {
         if (!config.enabled) return
-        if (!isBal(event.entity)) return
+        val bal = event.entity
+        if (!isBal(bal)) return
 
         lastBalDamageTime = SimpleTimeMark.now()
 
-        // Bal took damage from ANY player -> decrement total boss HP
-        if (lastBalDamageTickTime.passedSince() >= 350.milliseconds) {
+        // 1. Did our local player attack or shoot at Bal recently?
+        val ourPlayerAttacked = lastPlayerAttackTime.passedSince() <= 1200.milliseconds ||
+            lastPlayerShotTime.passedSince() <= 1500.milliseconds
+
+        // 2. Did another player in the arena attack or shoot at Bal?
+        val otherPlayerAttacked = checkOtherPlayerAttack(bal)
+
+        val isRealPlayerHit = ourPlayerAttacked || otherPlayerAttacked
+
+        // Only decrement Bal's health if a REAL player attack occurred!
+        // Prevents fake damage ticks from Venomous enchant, Fire Aspect, or poison from draining Bal's HP.
+        if (isRealPlayerHit && lastBalDamageTickTime.passedSince() >= 350.milliseconds) {
             lastBalDamageTickTime = SimpleTimeMark.now()
             if (balCurrentHp > 0) {
                 balCurrentHp--
@@ -396,11 +413,8 @@ object BalBossTracker {
             updateBossBar()
         }
 
-        // Did our player attack or shoot at Bal recently?
-        val playerAttacked = lastPlayerAttackTime.passedSince() <= 1200.milliseconds ||
-            lastPlayerShotTime.passedSince() <= 1500.milliseconds
-
-        if (playerAttacked) {
+        // Register hit for our local player
+        if (ourPlayerAttacked) {
             if (lastRegisteredHitTime.passedSince() >= 380.milliseconds) {
                 lastRegisteredHitTime = SimpleTimeMark.now()
                 lastPlayerAttackTime = SimpleTimeMark.farPast()
@@ -408,6 +422,32 @@ object BalBossTracker {
                 registerHit()
             }
         }
+    }
+
+    @OptIn(AllEntitiesGetter::class)
+    private fun checkOtherPlayerAttack(bal: Entity): Boolean {
+        // Find other players in Khazad-dûm near Bal
+        val otherPlayers = EntityUtils.getPlayerEntities().filter { it.distanceTo(bal) <= 30.0 }
+        if (otherPlayers.isEmpty()) return false
+
+        // Check if any other player is swinging their weapon near Bal (melee)
+        if (otherPlayers.any { it.distanceTo(bal) <= 7.0 && (it.swinging || it.attackAnim > 0) }) {
+            return true
+        }
+
+        // Check if an arrow is flying near Bal (ranged)
+        if (EntityUtils.getEntities<Arrow>().any { !it.isRemoved && it.distanceTo(bal) <= 6.0 }) {
+            return true
+        }
+
+        // Check if a damage indicator armor stand spawned at Bal recently
+        if (EntityUtils.getEntities<ArmorStand>().any {
+            it.distanceTo(bal) <= 6.0 && it.tickCount <= 10 && DamageIndicatorManager.isDamageSplash(it)
+        }) {
+            return true
+        }
+
+        return false
     }
 
     private fun registerHit() {
@@ -489,6 +529,15 @@ object BalBossTracker {
             ChatUtils.chat("§e[SkyHanni] §6§lRARE DROP! §r$rarityName Bal Pet§r§e! §7(Hits: §e${previousHits.addSeparators()}§7, Bosses: §e$previousBosses§7)")
             update()
             return
+        }
+
+        balNearlyTherePattern.matchMatcher(event.message) {
+            // Bal reaches 25% health (50 hits remaining)
+            if (balCurrentHp > 50) {
+                balCurrentHp = 50
+                update()
+                updateBossBar()
+            }
         }
 
         val cleanMsg = event.message.removeColor().trim()
