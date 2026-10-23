@@ -12,6 +12,7 @@ import at.hannibal2.skyhanni.config.features.mining.glacite.MineshaftConfig
 import at.hannibal2.skyhanni.config.features.mining.glacite.MineshaftPityDisplayConfig
 import at.hannibal2.skyhanni.config.features.mining.glacite.TunnelMapsConfig
 import at.hannibal2.skyhanni.config.features.mining.nucleus.AreaWallsConfig
+import at.hannibal2.skyhanni.config.features.mining.nucleus.BalBossTrackerConfig
 import at.hannibal2.skyhanni.config.features.mining.nucleus.CrystalHighlighterConfig
 import at.hannibal2.skyhanni.config.features.mining.nucleus.CrystalNucleusTrackerConfig
 import at.hannibal2.skyhanni.config.features.mining.nucleus.MetalDetectorConfig
@@ -72,6 +73,11 @@ class MiningConfig {
     @ConfigOption(name = "Crystal Nucleus Tracker", desc = "")
     @Accordion
     val crystalNucleusTracker: CrystalNucleusTrackerConfig = CrystalNucleusTrackerConfig()
+
+    @Expose
+    @ConfigOption(name = "Bal Boss Tracker", desc = "")
+    @Accordion
+    val balBossTracker: BalBossTrackerConfig = BalBossTrackerConfig()
 
     @Expose
     @ConfigOption(name = "Metal Detector", desc = "")

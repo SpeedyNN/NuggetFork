@@ -884,6 +884,32 @@ class ProfileSpecificStorage(
         var flowstatePersonalBest = 0
 
         @Expose
+        var balBossTracker: BalBossTrackerStorage = BalBossTrackerStorage()
+
+        class BalBossTrackerStorage {
+            @Expose
+            var hitsSinceLastPet: Long = 0L
+
+            @Expose
+            var bossesSinceLastPet: Int = 0
+
+            @Expose
+            var petsDropped: Int = 0
+
+            @Expose
+            var epicPetsDropped: Int = 0
+
+            @Expose
+            var legPetsDropped: Int = 0
+
+            @Expose
+            var totalHits: Long = 0L
+
+            @Expose
+            var totalBosses: Int = 0
+        }
+
+        @Expose
         var darkMonolithTracker: DarkMonolithFeatures.Data = DarkMonolithFeatures.Data()
     }
 
