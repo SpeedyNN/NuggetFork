@@ -29,6 +29,8 @@ import at.hannibal2.skyhanni.utils.NumberUtil.formatPercentage
 import at.hannibal2.skyhanni.utils.PlayerUtils
 import at.hannibal2.skyhanni.utils.RegexUtils.matchMatcher
 import at.hannibal2.skyhanni.utils.RenderDisplayHelper
+import at.hannibal2.skyhanni.utils.RenderUtils
+import at.hannibal2.skyhanni.utils.RenderUtils.HorizontalAlignment
 import at.hannibal2.skyhanni.utils.RenderUtils.renderRenderables
 import at.hannibal2.skyhanni.utils.SimpleTimeMark
 import at.hannibal2.skyhanni.utils.StringUtils.removeColor
@@ -45,6 +47,7 @@ import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.monster.cubemob.MagmaCube
 import net.minecraft.world.entity.projectile.arrow.Arrow
+import java.awt.Color
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -104,9 +107,14 @@ object BalBossTracker {
     var sessionHits: Long = 0L
         private set
 
+    const val BAL_MAX_HP = 200
+    var balCurrentHp: Int = BAL_MAX_HP
+        private set
+
     private var currentBossHits: Int = 0
     private var lastPlayerAttackTime = SimpleTimeMark.farPast()
     private var lastBalDamageTime = SimpleTimeMark.farPast()
+    private var lastBalDamageTickTime = SimpleTimeMark.farPast()
     private var lastRegisteredHitTime = SimpleTimeMark.farPast()
     private var lastBalDefeatedTime = SimpleTimeMark.farPast()
     private var lastBalSeenTime = SimpleTimeMark.farPast()
@@ -114,6 +122,7 @@ object BalBossTracker {
     private var cachedBalId: Int? = null
 
     private var display = listOf<Renderable>()
+    private var bossBarDisplay = listOf<Renderable>()
 
     /**
      * Base Bal Pet drop rates from a registered hit:
@@ -132,6 +141,7 @@ object BalBossTracker {
     )
 
     init {
+        // Main Tracker Overlay
         RenderDisplayHelper(
             condition = {
                 if (display.isEmpty()) {
@@ -146,6 +156,22 @@ object BalBossTracker {
                 posLabel = "Bal Boss Tracker",
             )
         }
+
+        // Dedicated Boss Health Bar
+        RenderDisplayHelper(
+            condition = {
+                if (bossBarDisplay.isEmpty()) {
+                    updateBossBar()
+                }
+                isBossBarDisplayEnabled()
+            },
+            outsideInventory = true,
+        ) {
+            config.bossBarPosition.renderRenderables(
+                bossBarDisplay,
+                posLabel = "Bal Boss Health Bar",
+            )
+        }
     }
 
     private fun isDisplayEnabled(): Boolean {
@@ -153,6 +179,13 @@ object BalBossTracker {
         if (config.onlyInKhazadDum && !inKhazadDum()) return false
         if (config.onlyInCrystalHollows && !IslandType.CRYSTAL_HOLLOWS.isInIsland()) return false
         return true
+    }
+
+    private fun isBossBarDisplayEnabled(): Boolean {
+        if (!config.enabled || !config.showBossHealthBar) return false
+        if (config.onlyInKhazadDum && !inKhazadDum()) return false
+        if (config.onlyInCrystalHollows && !IslandType.CRYSTAL_HOLLOWS.isInIsland()) return false
+        return findBalEntity() != null || (inKhazadDum() && lastBalSeenTime.passedSince() < 8.seconds)
     }
 
     private fun inKhazadDum(): Boolean {
@@ -218,7 +251,12 @@ object BalBossTracker {
         }
         val bal = EntityUtils.getEntities<MagmaCube>().firstOrNull { isBal(it) }
         if (bal != null) {
-            cachedBalId = bal.id
+            if (cachedBalId != bal.id) {
+                cachedBalId = bal.id
+                balCurrentHp = BAL_MAX_HP
+                update()
+                updateBossBar()
+            }
         }
         return bal
     }
@@ -260,7 +298,6 @@ object BalBossTracker {
         val bal = findBalEntity()
         if (bal != null) {
             lastBalSeenTime = SimpleTimeMark.now()
-            cachedBalId = bal.id
 
             if (bal.isDeadOrDying || bal.isRemoved) {
                 handleBalDefeated()
@@ -292,6 +329,17 @@ object BalBossTracker {
 
         lastBalDamageTime = SimpleTimeMark.now()
 
+        // Bal took damage from ANY player -> decrement total boss HP
+        if (lastBalDamageTickTime.passedSince() >= 350.milliseconds) {
+            lastBalDamageTickTime = SimpleTimeMark.now()
+            if (balCurrentHp > 0) {
+                balCurrentHp--
+            }
+            update()
+            updateBossBar()
+        }
+
+        // Did our player attack Bal recently?
         if (lastPlayerAttackTime.passedSince() <= 1200.milliseconds) {
             if (lastRegisteredHitTime.passedSince() >= 380.milliseconds) {
                 lastRegisteredHitTime = SimpleTimeMark.now()
@@ -322,8 +370,15 @@ object BalBossTracker {
             totalBosses++
             currentBossHits = 0
             cachedBalId = null
+            balCurrentHp = BAL_MAX_HP
             update()
+            updateBossBar()
             ChatUtils.chat("§a[SkyHanni] §6Bal defeated! §7Bosses since last pet: §e$bossesSinceLastPet")
+        } else {
+            cachedBalId = null
+            balCurrentHp = BAL_MAX_HP
+            update()
+            updateBossBar()
         }
     }
 
@@ -385,6 +440,7 @@ object BalBossTracker {
     fun onSecondPassed(event: SecondPassedEvent) {
         if (!config.enabled) return
         update()
+        updateBossBar()
     }
 
     fun calculateEffectiveChance(): Double {
@@ -407,6 +463,13 @@ object BalBossTracker {
         ChatUtils.chat("§a[SkyHanni] Reset Bal session hits!")
     }
 
+    fun resetBossHp(hp: Int = BAL_MAX_HP) {
+        balCurrentHp = hp.coerceIn(0, BAL_MAX_HP)
+        update()
+        updateBossBar()
+        ChatUtils.chat("§a[SkyHanni] Set Bal health to §e$balCurrentHp§7/§e$BAL_MAX_HP§a.")
+    }
+
     fun resetAllStats() {
         sessionHits = 0L
         hitsSinceLastPet = 0L
@@ -417,8 +480,38 @@ object BalBossTracker {
         totalHits = 0L
         totalBosses = 0
         currentBossHits = 0
+        balCurrentHp = BAL_MAX_HP
         update()
+        updateBossBar()
         ChatUtils.chat("§a[SkyHanni] Reset all Bal Boss Tracker statistics!")
+    }
+
+    private fun updateBossBar() {
+        val hp = balCurrentHp.coerceIn(0, BAL_MAX_HP)
+        val percent = hp.toDouble() / BAL_MAX_HP
+        val colorCode = when {
+            percent > 0.5 -> "§a"
+            percent > 0.2 -> "§e"
+            else -> "§c"
+        }
+        val percentInt = (percent * 100).roundToInt()
+
+        val title = Renderable.text("§c§lBal §7- $colorCode$hp§7/§a200 ❤ §8($colorCode$percentInt%§8)")
+        val bar = Renderable.progressBar(
+            percent = percent,
+            width = 160,
+            height = 6,
+            startColor = Color(255, 60, 60),
+            endColor = Color(60, 255, 60),
+        )
+
+        bossBarDisplay = listOf(
+            Renderable.vertical(
+                listOf(title, bar),
+                spacing = 2,
+                horizontalAlign = HorizontalAlignment.CENTER,
+            ),
+        )
     }
 
     private fun update() {
@@ -431,6 +524,17 @@ object BalBossTracker {
 
         val lines = buildList {
             add(Renderable.text("§6§lBal Boss Tracker"))
+
+            if (config.showBossHealthInTracker) {
+                val hp = balCurrentHp.coerceIn(0, BAL_MAX_HP)
+                val percent = (hp.toDouble() / BAL_MAX_HP * 100).roundToInt()
+                val hpColor = when {
+                    percent > 50 -> "§a"
+                    percent > 20 -> "§e"
+                    else -> "§c"
+                }
+                add(Renderable.text("§7Bal HP: $hpColor$hp§7/§a200 §8($hpColor$percent%§8)"))
+            }
 
             if (config.showSessionHits) {
                 add(Renderable.text("§7Session Hits: §e${sessionHits.addSeparators()}"))
@@ -477,6 +581,15 @@ object BalBossTracker {
             }
             literal("all") {
                 simpleCallback { resetAllStats() }
+            }
+            literal("hp") {
+                arg("amount", BrigadierArguments.integer(0, BAL_MAX_HP)) { amountArg ->
+                    callback {
+                        val amount = getArg(amountArg)
+                        resetBossHp(amount)
+                    }
+                }
+                simpleCallback { resetBossHp() }
             }
             literal("bosses") {
                 arg("amount", BrigadierArguments.integer(0)) { amountArg ->
