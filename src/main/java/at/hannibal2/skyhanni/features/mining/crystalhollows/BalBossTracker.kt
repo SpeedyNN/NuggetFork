@@ -37,6 +37,7 @@ import at.hannibal2.skyhanni.utils.NumberUtil.formatPercentage
 import at.hannibal2.skyhanni.utils.PlayerUtils
 import at.hannibal2.skyhanni.utils.RaycastUtils
 import at.hannibal2.skyhanni.utils.RegexUtils.matchMatcher
+import at.hannibal2.skyhanni.utils.RegexUtils.matches
 import at.hannibal2.skyhanni.utils.RenderDisplayHelper
 import at.hannibal2.skyhanni.utils.RenderUtils
 import at.hannibal2.skyhanni.utils.RenderUtils.HorizontalAlignment
@@ -153,9 +154,19 @@ object BalBossTracker {
         "(?:(?:§.)*\\[.*(?:§.)*\\+*(?:§.)*\\] )?(?<player>.*)§r§f §r§ehas obtained §r§a§r§7\\[Lvl 1\\] §r§(?<raritycolor>[65])Bal§r§e!",
     )
 
+    private val balMinionsPattern by patternGroup.pattern(
+        "bal.minions",
+        ".*(?:Bah! Come forth my minions|Grrrr! You won't be able to hit my Fire Bats).*",
+    )
+
+    private val balHalfwayPattern by patternGroup.pattern(
+        "bal.halfway",
+        ".*(?:Halfway there! The boss is starting to become weaker|Halfway there!).*",
+    )
+
     private val balNearlyTherePattern by patternGroup.pattern(
         "bal.nearlythere",
-        ".*Nearly there! The boss can't last much longer.*",
+        ".*(?:Nearly there! The boss can't last much longer|Nearly there!).*",
     )
 
     init {
@@ -203,7 +214,9 @@ object BalBossTracker {
         if (!config.enabled || !config.showBossHealthBar) return false
         if (config.onlyInKhazadDum && !inKhazadDum()) return false
         if (config.onlyInCrystalHollows && !IslandType.CRYSTAL_HOLLOWS.isInIsland()) return false
-        return findBalEntity() != null || (inKhazadDum() && lastBalSeenTime.passedSince() < 25.seconds)
+        if (findBalEntity() != null) return true
+        if (lastBalDefeatedTime.passedSince() < 8.seconds && inKhazadDum()) return true
+        return inKhazadDum() && lastBalSeenTime.passedSince() < 25.seconds
     }
 
     private fun inKhazadDum(): Boolean {
@@ -261,9 +274,8 @@ object BalBossTracker {
         if (bal != null) {
             if (cachedBalId != bal.id) {
                 cachedBalId = bal.id
-                if (balCurrentHp <= 0 || lastBalSeenTime.passedSince() >= 30.seconds) {
-                    balCurrentHp = BAL_MAX_HP
-                }
+                balCurrentHp = BAL_MAX_HP
+                currentBossHits = 0
                 update()
                 updateBossBar()
             }
@@ -372,13 +384,31 @@ object BalBossTracker {
         if (bal != null) {
             lastBalSeenTime = SimpleTimeMark.now()
 
+            // If a previously defeated Bal is alive again with 0 HP, reset to 200
+            if (balCurrentHp <= 0 && lastBalDefeatedTime.passedSince() >= 3.seconds) {
+                balCurrentHp = BAL_MAX_HP
+                currentBossHits = 0
+                update()
+                updateBossBar()
+            }
+
             if (bal.isDeadOrDying || bal.isRemoved) {
                 handleBalDefeated()
                 return
             }
         } else {
-            if (cachedBalId != null && (balCurrentHp <= 0 || lastBalSeenTime.passedSince() >= 30.seconds)) {
-                handleBalDefeated()
+            // Bal entity is not currently in the world
+            if (cachedBalId != null) {
+                val recentlyDamaged = lastBalDamageTime.passedSince() <= 5.seconds
+                val wasLowHealth = balCurrentHp <= 30
+                if (wasLowHealth || recentlyDamaged) {
+                    handleBalDefeated()
+                } else if (lastBalSeenTime.passedSince() >= 30.seconds) {
+                    cachedBalId = null
+                    balCurrentHp = BAL_MAX_HP
+                    update()
+                    updateBossBar()
+                }
             }
         }
     }
@@ -460,26 +490,29 @@ object BalBossTracker {
     }
 
     private fun handleBalDefeated() {
-        if (lastBalDefeatedTime.passedSince() < 15.seconds) return
+        balCurrentHp = 0
+        update()
+        updateBossBar()
+
+        if (lastBalDefeatedTime.passedSince() < 10.seconds) return
+        lastBalDefeatedTime = SimpleTimeMark.now()
 
         val participated = currentBossHits > 0 ||
             lastPlayerAttackTime.passedSince() < 60.seconds ||
             lastPlayerShotTime.passedSince() < 60.seconds ||
             (inKhazadDum() && (sessionHits > 0 || currentBossHits > 0) && lastBalSeenTime.passedSince() < 60.seconds)
 
+        cachedBalId = null
+
         if (participated) {
-            lastBalDefeatedTime = SimpleTimeMark.now()
             bossesSinceLastPet++
             totalBosses++
             currentBossHits = 0
-            cachedBalId = null
-            balCurrentHp = BAL_MAX_HP
             update()
             updateBossBar()
             ChatUtils.chat("§a[SkyHanni] §6Bal defeated! §7Bosses since last pet: §e$bossesSinceLastPet")
         } else {
-            cachedBalId = null
-            balCurrentHp = BAL_MAX_HP
+            currentBossHits = 0
             update()
             updateBossBar()
         }
@@ -532,20 +565,73 @@ object BalBossTracker {
             return
         }
 
-        balNearlyTherePattern.matchMatcher(event.message) {
-            // Bal reaches 25% health (50 hits remaining)
+        val cleanMsg = event.message.removeColor().trim()
+
+        // 75% Milestone (150 HP / hits)
+        if (balMinionsPattern.matches(cleanMsg) ||
+            cleanMsg.contains("Come forth my minions", ignoreCase = true) ||
+            cleanMsg.contains("hit my Fire Bats", ignoreCase = true) ||
+            (cleanMsg.contains("Bal", ignoreCase = true) && cleanMsg.contains("75%", ignoreCase = true))
+        ) {
+            if (balCurrentHp > 150) {
+                balCurrentHp = 150
+                update()
+                updateBossBar()
+                ChatUtils.debug("BalBossTracker: Synced Bal HP to 150 (75%) from chat")
+            }
+        }
+
+        // 50% Milestone (100 HP / hits)
+        if (balHalfwayPattern.matches(cleanMsg) ||
+            cleanMsg.contains("Halfway there", ignoreCase = true) ||
+            cleanMsg.contains("starting to become weaker", ignoreCase = true) ||
+            (cleanMsg.contains("Bal", ignoreCase = true) && cleanMsg.contains("50%", ignoreCase = true))
+        ) {
+            if (balCurrentHp > 100) {
+                balCurrentHp = 100
+                update()
+                updateBossBar()
+                ChatUtils.debug("BalBossTracker: Synced Bal HP to 100 (50%) from chat")
+            }
+        }
+
+        // 25% Milestone (50 HP / hits)
+        if (balNearlyTherePattern.matches(cleanMsg) ||
+            cleanMsg.contains("Nearly there", ignoreCase = true) ||
+            cleanMsg.contains("can't last much longer", ignoreCase = true) ||
+            cleanMsg.contains("can't take much more", ignoreCase = true) ||
+            (cleanMsg.contains("Bal", ignoreCase = true) && cleanMsg.contains("25%", ignoreCase = true))
+        ) {
             if (balCurrentHp > 50) {
                 balCurrentHp = 50
                 update()
                 updateBossBar()
+                ChatUtils.debug("BalBossTracker: Synced Bal HP to 50 (25%) from chat")
             }
         }
 
-        val cleanMsg = event.message.removeColor().trim()
-        if (cleanMsg.contains("Bal", ignoreCase = true) &&
-            (cleanMsg.contains("defeated", ignoreCase = true) || cleanMsg.contains("slain", ignoreCase = true) || cleanMsg.contains("died", ignoreCase = true))
-        ) {
+        // Defeat / Death Messages
+        val isDefeatMsg = (cleanMsg.contains("Bal", ignoreCase = true) &&
+            (cleanMsg.contains("defeated", ignoreCase = true) || cleanMsg.contains("slain", ignoreCase = true) || cleanMsg.contains("died", ignoreCase = true) || cleanMsg.contains("killed", ignoreCase = true))) ||
+            cleanMsg.contains("BOSS SLAIN", ignoreCase = true) ||
+            cleanMsg.contains("The boss has been defeated", ignoreCase = true) ||
+            cleanMsg.contains("The boss was defeated", ignoreCase = true) ||
+            cleanMsg.contains("The boss died", ignoreCase = true) ||
+            (cleanMsg.contains("Topaz Crystal", ignoreCase = true) && (cleanMsg.contains("unlocked", ignoreCase = true) || cleanMsg.contains("claimed", ignoreCase = true)))
+
+        if (isDefeatMsg) {
             handleBalDefeated()
+        }
+
+        // Spawn Messages
+        if (cleanMsg.contains("Bal", ignoreCase = true) &&
+            (cleanMsg.contains("has spawned", ignoreCase = true) || cleanMsg.contains("spawned!", ignoreCase = true) || cleanMsg.contains("awakened", ignoreCase = true))
+        ) {
+            balCurrentHp = BAL_MAX_HP
+            currentBossHits = 0
+            update()
+            updateBossBar()
+            ChatUtils.debug("BalBossTracker: Bal HP reset to 200 from spawn chat message")
         }
     }
 
@@ -603,13 +689,19 @@ object BalBossTracker {
         val hp = balCurrentHp.coerceIn(0, BAL_MAX_HP)
         val percent = hp.toDouble() / BAL_MAX_HP
         val colorCode = when {
+            hp == 0 -> "§8"
             percent > 0.5 -> "§a"
             percent > 0.2 -> "§e"
             else -> "§c"
         }
         val percentInt = (percent * 100).roundToInt()
 
-        val title = Renderable.text("§c§lBal §7- $colorCode$hp§7/§a200 ❤ §8($colorCode$percentInt%§8)")
+        val titleText = if (hp == 0) {
+            "§c§lBal §7- §c§lDEFEATED §8(0/200 ❤)"
+        } else {
+            "§c§lBal §7- $colorCode$hp§7/§a200 ❤ §8($colorCode$percentInt%§8)"
+        }
+        val title = Renderable.text(titleText)
         val bar = Renderable.progressBar(
             percent = percent,
             width = 160,
@@ -655,11 +747,13 @@ object BalBossTracker {
                 val hp = balCurrentHp.coerceIn(0, BAL_MAX_HP)
                 val percent = (hp.toDouble() / BAL_MAX_HP * 100).roundToInt()
                 val hpColor = when {
+                    hp == 0 -> "§8"
                     percent > 50 -> "§a"
                     percent > 20 -> "§e"
                     else -> "§c"
                 }
-                add(Renderable.text("§7Bal HP: $hpColor$hp§7/§a200 §8($hpColor$percent%§8)"))
+                val hpText = if (hp == 0) "§cDEFEATED §8(0/200)" else "$hpColor$hp§7/§a200 §8($hpColor$percent%§8)"
+                add(Renderable.text("§7Bal HP: $hpText"))
             }
 
             if (config.showSessionHits) {
