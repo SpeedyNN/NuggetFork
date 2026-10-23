@@ -45,7 +45,6 @@ import at.hannibal2.skyhanni.utils.RenderUtils.renderRenderables
 import at.hannibal2.skyhanni.utils.SimpleTimeMark
 import at.hannibal2.skyhanni.utils.StringUtils.removeColor
 import at.hannibal2.skyhanni.utils.compat.MinecraftCompat
-import at.hannibal2.skyhanni.utils.compat.MinecraftCompat.isLocalPlayer
 import at.hannibal2.skyhanni.utils.renderables.Renderable
 import at.hannibal2.skyhanni.utils.renderables.container.VerticalContainerRenderable.Companion.vertical
 import at.hannibal2.skyhanni.utils.renderables.primitives.text
@@ -125,10 +124,11 @@ object BalBossTracker {
         private set
 
     private var currentBossHits: Int = 0
+    private var pendingPlayerHits: Int = 0
     private var lastPlayerAttackTime = SimpleTimeMark.farPast()
     private var lastPlayerShotTime = SimpleTimeMark.farPast()
+    private var lastOtherPlayerAttackTime = SimpleTimeMark.farPast()
     private var lastBalDamageTime = SimpleTimeMark.farPast()
-    private var lastBalDamageTickTime = SimpleTimeMark.farPast()
     private var lastRegisteredHitTime = SimpleTimeMark.farPast()
     private var lastBalDefeatedTime = SimpleTimeMark.farPast()
     private var lastBalSeenTime = SimpleTimeMark.farPast()
@@ -152,11 +152,6 @@ object BalBossTracker {
     private val balObtainedPattern by patternGroup.pattern(
         "bal.obtained",
         "(?:(?:§.)*\\[.*(?:§.)*\\+*(?:§.)*\\] )?(?<player>.*)§r§f §r§ehas obtained §r§a§r§7\\[Lvl 1\\] §r§(?<raritycolor>[65])Bal§r§e!",
-    )
-
-    private val balMinionsPattern by patternGroup.pattern(
-        "bal.minions",
-        ".*(?:Bah! Come forth my minions|Grrrr! You won't be able to hit my Fire Bats).*",
     )
 
     private val balHalfwayPattern by patternGroup.pattern(
@@ -274,10 +269,14 @@ object BalBossTracker {
         if (bal != null) {
             if (cachedBalId != bal.id) {
                 cachedBalId = bal.id
-                balCurrentHp = BAL_MAX_HP
-                currentBossHits = 0
-                update()
-                updateBossBar()
+                // Only reset HP to 200 if Bal was already dead or no prior Bal cached
+                if (balCurrentHp <= 0 || lastBalDefeatedTime.passedSince() >= 5.seconds) {
+                    balCurrentHp = BAL_MAX_HP
+                    currentBossHits = 0
+                    pendingPlayerHits = 0
+                    update()
+                    updateBossBar()
+                }
             }
         }
         return bal
@@ -292,6 +291,24 @@ object BalBossTracker {
             internalName.contains("BOW") ||
             internalName.contains("TERMINATOR") ||
             internalName.contains("JUJU")
+    }
+
+    private fun isWearingTerror(): Boolean {
+        return InventoryUtils.getArmorInternalNames().any { it.asString().contains("TERROR") }
+    }
+
+    private fun getArrowsPerShot(): Int {
+        val item = InventoryUtils.getItemInHand() ?: return 1
+        val internalName = item.getInternalNameOrNull()?.asString().orEmpty()
+        val cleanName = item.itemCleanName
+        val base = when {
+            cleanName.contains("Terminator", ignoreCase = true) || internalName.contains("TERMINATOR") -> 3
+            cleanName.contains("Runaan", ignoreCase = true) || internalName.contains("RUNAAN") -> 3
+            cleanName.contains("Hurricane", ignoreCase = true) || internalName.contains("HURRICANE") -> 5
+            else -> 1
+        }
+        val extraTerror = if (isWearingTerror()) 2 else 0
+        return base + extraTerror
     }
 
     private fun isPlayerAimingAtBal(bal: Entity): Boolean {
@@ -312,10 +329,13 @@ object BalBossTracker {
     }
 
     private fun handlePlayerAttackOnBal() {
+        pendingPlayerHits = (pendingPlayerHits + 1).coerceAtMost(15)
         lastPlayerAttackTime = SimpleTimeMark.now()
     }
 
     private fun handlePlayerShotAtBal() {
+        val arrows = getArrowsPerShot()
+        pendingPlayerHits = (pendingPlayerHits + arrows).coerceAtMost(15)
         lastPlayerShotTime = SimpleTimeMark.now()
     }
 
@@ -388,8 +408,18 @@ object BalBossTracker {
             if (balCurrentHp <= 0 && lastBalDefeatedTime.passedSince() >= 3.seconds) {
                 balCurrentHp = BAL_MAX_HP
                 currentBossHits = 0
+                pendingPlayerHits = 0
                 update()
                 updateBossBar()
+            }
+
+            // Track other players attacking in Khazad-dûm
+            val otherPlayers = EntityUtils.getPlayerEntities().filter { !it.isLocalPlayer && it.distanceTo(bal) <= 35.0 }
+            if (otherPlayers.any { it.swinging || it.attackAnim > 0 }) {
+                lastOtherPlayerAttackTime = SimpleTimeMark.now()
+            }
+            if (EntityUtils.getEntities<Arrow>().any { !it.owner.isLocalPlayer && it.distanceTo(bal) <= 30.0 }) {
+                lastOtherPlayerAttackTime = SimpleTimeMark.now()
             }
 
             if (bal.isDeadOrDying || bal.isRemoved) {
@@ -399,41 +429,61 @@ object BalBossTracker {
         } else {
             // Bal entity is not currently in the world
             if (cachedBalId != null) {
-                val recentlyDamaged = lastBalDamageTime.passedSince() <= 5.seconds
-                val wasLowHealth = balCurrentHp <= 30
-                if (wasLowHealth || recentlyDamaged) {
+                if (balCurrentHp <= 5 && lastBalSeenTime.passedSince() >= 2.seconds) {
                     handleBalDefeated()
                 } else if (lastBalSeenTime.passedSince() >= 30.seconds) {
                     cachedBalId = null
                     balCurrentHp = BAL_MAX_HP
+                    currentBossHits = 0
+                    pendingPlayerHits = 0
                     update()
                     updateBossBar()
                 }
             }
         }
+
+        // Expire stale pending hits if player hasn't attacked recently
+        if (lastPlayerAttackTime.passedSince() > 800.milliseconds &&
+            lastPlayerShotTime.passedSince() > 800.milliseconds
+        ) {
+            pendingPlayerHits = 0
+        }
     }
 
+    @OptIn(AllEntitiesGetter::class)
     @HandleEvent(onlyOnIsland = IslandType.CRYSTAL_HOLLOWS)
     fun onEntityHurt(event: EntityHurtEvent<*>) {
         if (!config.enabled) return
         val bal = event.entity
         if (!isBal(bal)) return
 
+        val timeSinceLastDamage = lastBalDamageTime.passedSince()
         lastBalDamageTime = SimpleTimeMark.now()
 
-        // 1. Did our local player attack or shoot at Bal recently?
-        val ourPlayerAttacked = lastPlayerAttackTime.passedSince() <= 1200.milliseconds ||
-            lastPlayerShotTime.passedSince() <= 1500.milliseconds
+        // Expire stale pending hits (arrows that missed)
+        if (lastPlayerAttackTime.passedSince() > 800.milliseconds &&
+            lastPlayerShotTime.passedSince() > 800.milliseconds
+        ) {
+            pendingPlayerHits = 0
+        }
 
-        // 2. Did another player in the arena attack or shoot at Bal?
+        val hasOurArrow = EntityUtils.getEntities<Arrow>().any { it.owner.isLocalPlayer && it.distanceTo(bal) <= 35.0 }
+
+        // 1. Is this our local player's attack?
+        val isOurHit = pendingPlayerHits > 0 ||
+            lastPlayerAttackTime.passedSince() <= 400.milliseconds ||
+            (hasOurArrow && lastPlayerShotTime.passedSince() <= 1200.milliseconds)
+
+        // 2. Did another player in Khazad-dûm attack Bal?
         val otherPlayerAttacked = checkOtherPlayerAttack(bal)
 
-        val isRealPlayerHit = ourPlayerAttacked || otherPlayerAttacked
+        // 3. Rapid damage cannot be DoT (Venomous/Fire Aspect ticks at >= 500ms)
+        val isRapidDamage = timeSinceLastDamage <= 400.milliseconds
 
-        // Only decrement Bal's health if a REAL player attack occurred!
-        // Prevents fake damage ticks from Venomous enchant, Fire Aspect, or poison from draining Bal's HP.
-        if (isRealPlayerHit && lastBalDamageTickTime.passedSince() >= 350.milliseconds) {
-            lastBalDamageTickTime = SimpleTimeMark.now()
+        val isRealDamage = isOurHit || otherPlayerAttacked || isRapidDamage
+
+        // Decrement Bal's HP for every valid damage packet
+        if (isRealDamage) {
             if (balCurrentHp > 0) {
                 balCurrentHp--
             }
@@ -445,36 +495,39 @@ object BalBossTracker {
         }
 
         // Register hit for our local player
-        if (ourPlayerAttacked) {
-            if (lastRegisteredHitTime.passedSince() >= 380.milliseconds) {
-                lastRegisteredHitTime = SimpleTimeMark.now()
-                lastPlayerAttackTime = SimpleTimeMark.farPast()
-                lastPlayerShotTime = SimpleTimeMark.farPast()
-                registerHit()
+        if (isOurHit) {
+            if (pendingPlayerHits > 0) {
+                pendingPlayerHits--
             }
+            registerHit()
         }
     }
 
     @OptIn(AllEntitiesGetter::class)
     private fun checkOtherPlayerAttack(bal: Entity): Boolean {
+        if (lastOtherPlayerAttackTime.passedSince() <= 600.milliseconds) return true
+
         // Find other players in Khazad-dûm near Bal
-        val otherPlayers = EntityUtils.getPlayerEntities().filter { it.distanceTo(bal) <= 30.0 }
+        val otherPlayers = EntityUtils.getPlayerEntities().filter { !it.isLocalPlayer && it.distanceTo(bal) <= 35.0 }
         if (otherPlayers.isEmpty()) return false
 
-        // Check if any other player is swinging their weapon near Bal (melee)
-        if (otherPlayers.any { it.distanceTo(bal) <= 7.0 && (it.swinging || it.attackAnim > 0) }) {
+        // Check if any other player is swinging or attacking near Bal
+        if (otherPlayers.any { it.swinging || it.attackAnim > 0 }) {
+            lastOtherPlayerAttackTime = SimpleTimeMark.now()
             return true
         }
 
-        // Check if an arrow is flying near Bal (ranged)
-        if (EntityUtils.getEntities<Arrow>().any { !it.isRemoved && it.distanceTo(bal) <= 6.0 }) {
+        // Check if another player's arrow is flying near Bal
+        if (EntityUtils.getEntities<Arrow>().any { !it.owner.isLocalPlayer && it.distanceTo(bal) <= 30.0 }) {
+            lastOtherPlayerAttackTime = SimpleTimeMark.now()
             return true
         }
 
         // Check if a damage indicator armor stand spawned at Bal recently
         if (EntityUtils.getEntities<ArmorStand>().any {
-            it.distanceTo(bal) <= 6.0 && it.tickCount <= 10 && DamageIndicatorManager.isDamageSplash(it)
+            it.distanceTo(bal) <= 10.0 && it.tickCount <= 10 && DamageIndicatorManager.isDamageSplash(it)
         }) {
+            lastOtherPlayerAttackTime = SimpleTimeMark.now()
             return true
         }
 
@@ -491,6 +544,7 @@ object BalBossTracker {
 
     private fun handleBalDefeated() {
         balCurrentHp = 0
+        pendingPlayerHits = 0
         update()
         updateBossBar()
 
@@ -567,20 +621,6 @@ object BalBossTracker {
 
         val cleanMsg = event.message.removeColor().trim()
 
-        // 75% Milestone (150 HP / hits)
-        if (balMinionsPattern.matches(cleanMsg) ||
-            cleanMsg.contains("Come forth my minions", ignoreCase = true) ||
-            cleanMsg.contains("hit my Fire Bats", ignoreCase = true) ||
-            (cleanMsg.contains("Bal", ignoreCase = true) && cleanMsg.contains("75%", ignoreCase = true))
-        ) {
-            if (balCurrentHp > 150) {
-                balCurrentHp = 150
-                update()
-                updateBossBar()
-                ChatUtils.debug("BalBossTracker: Synced Bal HP to 150 (75%) from chat")
-            }
-        }
-
         // 50% Milestone (100 HP / hits)
         if (balHalfwayPattern.matches(cleanMsg) ||
             cleanMsg.contains("Halfway there", ignoreCase = true) ||
@@ -629,6 +669,7 @@ object BalBossTracker {
         ) {
             balCurrentHp = BAL_MAX_HP
             currentBossHits = 0
+            pendingPlayerHits = 0
             update()
             updateBossBar()
             ChatUtils.debug("BalBossTracker: Bal HP reset to 200 from spawn chat message")
