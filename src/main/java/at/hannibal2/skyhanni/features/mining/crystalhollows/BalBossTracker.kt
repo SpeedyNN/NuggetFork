@@ -4,37 +4,44 @@ import at.hannibal2.skyhanni.SkyHanniMod
 import at.hannibal2.skyhanni.api.event.HandleEvent
 import at.hannibal2.skyhanni.config.commands.CommandCategory
 import at.hannibal2.skyhanni.config.commands.CommandRegistrationEvent
+import at.hannibal2.skyhanni.config.commands.brigadier.BrigadierArguments
 import at.hannibal2.skyhanni.data.HypixelData
 import at.hannibal2.skyhanni.data.IslandType
 import at.hannibal2.skyhanni.data.ProfileStorageData
 import at.hannibal2.skyhanni.data.model.SkyblockStat
+import at.hannibal2.skyhanni.events.MobEvent
 import at.hannibal2.skyhanni.events.SecondPassedEvent
 import at.hannibal2.skyhanni.events.chat.SkyHanniChatEvent
 import at.hannibal2.skyhanni.events.entity.EntityClickEvent
 import at.hannibal2.skyhanni.events.entity.EntityDeathEvent
 import at.hannibal2.skyhanni.events.entity.EntityHurtEvent
-import at.hannibal2.skyhanni.events.MobEvent
+import at.hannibal2.skyhanni.events.minecraft.packet.PacketSentEvent
 import at.hannibal2.skyhanni.skyhannimodule.SkyHanniModule
 import at.hannibal2.skyhanni.utils.AllEntitiesGetter
 import at.hannibal2.skyhanni.utils.ChatUtils
 import at.hannibal2.skyhanni.utils.EntityUtils
 import at.hannibal2.skyhanni.utils.EntityUtils.cleanName
+import at.hannibal2.skyhanni.utils.EntityUtils.hasMaxHealth
 import at.hannibal2.skyhanni.utils.LocationUtils.distanceTo
+import at.hannibal2.skyhanni.utils.MobUtils.mob
 import at.hannibal2.skyhanni.utils.NumberUtil.addSeparators
 import at.hannibal2.skyhanni.utils.NumberUtil.formatPercentage
 import at.hannibal2.skyhanni.utils.PlayerUtils
 import at.hannibal2.skyhanni.utils.RegexUtils.matchMatcher
-import at.hannibal2.skyhanni.utils.RegexUtils.matches
 import at.hannibal2.skyhanni.utils.RenderDisplayHelper
 import at.hannibal2.skyhanni.utils.RenderUtils.renderRenderables
 import at.hannibal2.skyhanni.utils.SimpleTimeMark
 import at.hannibal2.skyhanni.utils.StringUtils.removeColor
+import at.hannibal2.skyhanni.utils.compat.MinecraftCompat
 import at.hannibal2.skyhanni.utils.compat.MinecraftCompat.isLocalPlayer
 import at.hannibal2.skyhanni.utils.renderables.Renderable
 import at.hannibal2.skyhanni.utils.renderables.container.VerticalContainerRenderable.Companion.vertical
 import at.hannibal2.skyhanni.utils.renderables.primitives.text
 import at.hannibal2.skyhanni.utils.repopatterns.RepoPattern
+import net.minecraft.network.protocol.game.ServerboundAttackPacket
+import net.minecraft.network.protocol.game.ServerboundInteractPacket
 import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.monster.cubemob.MagmaCube
 import net.minecraft.world.entity.projectile.arrow.Arrow
@@ -100,7 +107,11 @@ object BalBossTracker {
     private var currentBossHits: Int = 0
     private var lastPlayerAttackTime = SimpleTimeMark.farPast()
     private var lastBalDamageTime = SimpleTimeMark.farPast()
+    private var lastRegisteredHitTime = SimpleTimeMark.farPast()
     private var lastBalDefeatedTime = SimpleTimeMark.farPast()
+    private var lastBalSeenTime = SimpleTimeMark.farPast()
+
+    private var cachedBalId: Int? = null
 
     private var display = listOf<Renderable>()
 
@@ -118,11 +129,6 @@ object BalBossTracker {
     private val balObtainedPattern by patternGroup.pattern(
         "bal.obtained",
         "(?:(?:§.)*\\[.*(?:§.)*\\+*(?:§.)*\\] )?(?<player>.*)§r§f §r§ehas obtained §r§a§r§7\\[Lvl 1\\] §r§(?<raritycolor>[65])Bal§r§e!",
-    )
-
-    private val balDefeatedPattern by patternGroup.pattern(
-        "bal.defeated",
-        ".*(?:Bal boss was defeated|Bal has been defeated|Bal was defeated).*",
     )
 
     init {
@@ -156,12 +162,39 @@ object BalBossTracker {
     }
 
     fun isBal(entity: Entity): Boolean {
+        if (cachedBalId != null && entity.id == cachedBalId) return true
         if (entity is MagmaCube) {
-            if (entity.cleanName.contains("Bal", ignoreCase = true)) return true
-            if (entity.size >= 8) return true
-            if (IslandType.CRYSTAL_HOLLOWS.isInIsland() && entity.size > 3) return true
+            val mobName = (entity as? LivingEntity)?.mob?.name
+            if (mobName == "Bal") {
+                cachedBalId = entity.id
+                return true
+            }
+            if (entity.cleanName.contains("Bal", ignoreCase = true)) {
+                cachedBalId = entity.id
+                return true
+            }
+            if (inKhazadDum()) {
+                cachedBalId = entity.id
+                return true
+            }
+            if (hasNearbyBalArmorStand(entity)) {
+                cachedBalId = entity.id
+                return true
+            }
+            if (IslandType.CRYSTAL_HOLLOWS.isInIsland() && !entity.hasMaxHealth(35_000)) {
+                cachedBalId = entity.id
+                return true
+            }
         }
         return false
+    }
+
+    @OptIn(AllEntitiesGetter::class)
+    private fun hasNearbyBalArmorStand(entity: Entity): Boolean {
+        if (!IslandType.CRYSTAL_HOLLOWS.isInIsland()) return false
+        return EntityUtils.getEntities<ArmorStand>().any { armorStand ->
+            armorStand.distanceTo(entity) <= 6.0 && armorStand.cleanName.contains("Bal", ignoreCase = true)
+        }
     }
 
     private fun isBalArmorStand(entity: Entity): Boolean {
@@ -171,19 +204,26 @@ object BalBossTracker {
         return entity.distanceTo(bal) <= 6.0
     }
 
+    private fun isTargetNearBal(entity: Entity): Boolean {
+        val bal = findBalEntity() ?: return false
+        return entity.distanceTo(bal) <= 6.0
+    }
+
     @OptIn(AllEntitiesGetter::class)
     fun findBalEntity(): MagmaCube? {
         if (!IslandType.CRYSTAL_HOLLOWS.isInIsland()) return null
-        return EntityUtils.getEntities<MagmaCube>().firstOrNull { isBal(it) }
+        cachedBalId?.let { id ->
+            val entity = MinecraftCompat.localWorldOrNull?.getEntity(id) as? MagmaCube
+            if (entity != null && !entity.isRemoved) return entity
+        }
+        val bal = EntityUtils.getEntities<MagmaCube>().firstOrNull { isBal(it) }
+        if (bal != null) {
+            cachedBalId = bal.id
+        }
+        return bal
     }
 
     private fun handlePlayerAttackOnBal() {
-        val bal = findBalEntity()
-        val inIframe = (bal != null && bal.hurtTime > 0) || lastBalDamageTime.passedSince() < 450.milliseconds
-        if (inIframe) {
-            // Ignore iframe hits on boss
-            return
-        }
         lastPlayerAttackTime = SimpleTimeMark.now()
     }
 
@@ -193,7 +233,21 @@ object BalBossTracker {
         if (event.action != EntityClickEvent.ActionType.ATTACK) return
 
         val target = event.clickedEntity
-        if (isBal(target) || isBalArmorStand(target)) {
+        if (isBal(target) || isBalArmorStand(target) || isTargetNearBal(target)) {
+            handlePlayerAttackOnBal()
+        }
+    }
+
+    @HandleEvent(onlyOnIsland = IslandType.CRYSTAL_HOLLOWS)
+    fun onPacketSent(event: PacketSentEvent) {
+        if (!config.enabled) return
+        val packetEntityId = when (val packet = event.packet) {
+            is ServerboundInteractPacket -> packet.entityId
+            is ServerboundAttackPacket -> packet.entityId
+            else -> return
+        }
+        val entity = MinecraftCompat.localWorldOrNull?.getEntity(packetEntityId) ?: return
+        if (isBal(entity) || isBalArmorStand(entity) || isTargetNearBal(entity)) {
             handlePlayerAttackOnBal()
         }
     }
@@ -203,17 +257,30 @@ object BalBossTracker {
     fun onTick() {
         if (!config.enabled) return
 
-        val bal = findBalEntity() ?: return
-        val balBox = bal.boundingBox.inflate(0.5)
+        val bal = findBalEntity()
+        if (bal != null) {
+            lastBalSeenTime = SimpleTimeMark.now()
+            cachedBalId = bal.id
 
-        for (arrow in EntityUtils.getEntities<Arrow>()) {
-            if (!arrow.owner.isLocalPlayer) continue
-            if (arrow.isRemoved) continue
+            if (bal.isDeadOrDying || bal.isRemoved) {
+                handleBalDefeated()
+                return
+            }
 
-            val arrowBox = arrow.boundingBox
-            if (arrowBox.intersects(balBox) || balBox.contains(arrow.position())) {
-                handlePlayerAttackOnBal()
-                break
+            val balBox = bal.boundingBox.inflate(0.5)
+            for (arrow in EntityUtils.getEntities<Arrow>()) {
+                if (!arrow.owner.isLocalPlayer) continue
+                if (arrow.isRemoved) continue
+
+                val arrowBox = arrow.boundingBox
+                if (arrowBox.intersects(balBox) || balBox.contains(arrow.position())) {
+                    handlePlayerAttackOnBal()
+                    break
+                }
+            }
+        } else {
+            if (cachedBalId != null && lastBalSeenTime.passedSince() >= 1.seconds) {
+                handleBalDefeated()
             }
         }
     }
@@ -225,9 +292,12 @@ object BalBossTracker {
 
         lastBalDamageTime = SimpleTimeMark.now()
 
-        if (lastPlayerAttackTime.passedSince() <= 600.milliseconds) {
-            lastPlayerAttackTime = SimpleTimeMark.farPast()
-            registerHit()
+        if (lastPlayerAttackTime.passedSince() <= 1200.milliseconds) {
+            if (lastRegisteredHitTime.passedSince() >= 380.milliseconds) {
+                lastRegisteredHitTime = SimpleTimeMark.now()
+                lastPlayerAttackTime = SimpleTimeMark.farPast()
+                registerHit()
+            }
         }
     }
 
@@ -240,21 +310,27 @@ object BalBossTracker {
     }
 
     private fun handleBalDefeated() {
-        if (lastBalDefeatedTime.passedSince() < 10.seconds) return
-        lastBalDefeatedTime = SimpleTimeMark.now()
+        if (lastBalDefeatedTime.passedSince() < 15.seconds) return
 
-        if (currentBossHits > 0) {
+        val participated = currentBossHits > 0 ||
+            lastPlayerAttackTime.passedSince() < 60.seconds ||
+            (inKhazadDum() && (sessionHits > 0 || currentBossHits > 0) && lastBalSeenTime.passedSince() < 60.seconds)
+
+        if (participated) {
+            lastBalDefeatedTime = SimpleTimeMark.now()
             bossesSinceLastPet++
             totalBosses++
             currentBossHits = 0
+            cachedBalId = null
             update()
+            ChatUtils.chat("§a[SkyHanni] §6Bal defeated! §7Bosses since last pet: §e$bossesSinceLastPet")
         }
     }
 
     @HandleEvent(onlyOnIsland = IslandType.CRYSTAL_HOLLOWS)
     fun onEntityDeath(event: EntityDeathEvent<*>) {
         if (!config.enabled) return
-        if (isBal(event.entity)) {
+        if (isBal(event.entity) || event.entity.id == cachedBalId) {
             handleBalDefeated()
         }
     }
@@ -262,7 +338,7 @@ object BalBossTracker {
     @HandleEvent(onlyOnIsland = IslandType.CRYSTAL_HOLLOWS)
     fun onMobDespawn(event: MobEvent.DeSpawn) {
         if (!config.enabled) return
-        if (event.mob.name == "Bal") {
+        if (event.mob.name == "Bal" || event.mob.baseEntity.id == cachedBalId) {
             handleBalDefeated()
         }
     }
@@ -297,7 +373,10 @@ object BalBossTracker {
             return
         }
 
-        if (balDefeatedPattern.matches(event.message)) {
+        val cleanMsg = event.message.removeColor().trim()
+        if (cleanMsg.contains("Bal", ignoreCase = true) &&
+            (cleanMsg.contains("defeated", ignoreCase = true) || cleanMsg.contains("slain", ignoreCase = true) || cleanMsg.contains("died", ignoreCase = true))
+        ) {
             handleBalDefeated()
         }
     }
@@ -391,14 +470,42 @@ object BalBossTracker {
     @HandleEvent
     fun onCommandRegistration(event: CommandRegistrationEvent) {
         event.registerBrigadier("shresetbaltracker") {
-            description = "Resets the Bal Boss Tracker stats"
+            description = "Resets or manages the Bal Boss Tracker stats"
             category = CommandCategory.USERS_RESET
+            literal("session") {
+                simpleCallback { resetSessionHits() }
+            }
+            literal("all") {
+                simpleCallback { resetAllStats() }
+            }
+            literal("bosses") {
+                arg("amount", BrigadierArguments.integer(0)) { amountArg ->
+                    callback {
+                        val amount = getArg(amountArg)
+                        bossesSinceLastPet = amount
+                        totalBosses = maxOf(totalBosses, amount)
+                        update()
+                        ChatUtils.chat("§a[SkyHanni] Set Bal bosses since last pet to §e$amount§a.")
+                    }
+                }
+            }
+            literal("hits") {
+                arg("amount", BrigadierArguments.integer(0)) { amountArg ->
+                    callback {
+                        val amount = getArg(amountArg).toLong()
+                        hitsSinceLastPet = amount
+                        totalHits = maxOf(totalHits, amount)
+                        update()
+                        ChatUtils.chat("§a[SkyHanni] Set Bal hits since last pet to §e${amount.addSeparators()}§a.")
+                    }
+                }
+            }
             simpleCallback {
                 resetSessionHits()
                 ChatUtils.clickableChat(
-                    "§a[SkyHanni] Reset Bal session hits! §7Click here to reset ALL Bal stats.",
+                    "§a[SkyHanni] Reset Bal session hits! §7Click here to reset ALL Bal stats, or use §e/shresetbaltracker bosses <num>§7.",
                     onClick = { resetAllStats() },
-                    hover = "Click to reset all Bal statistics (hits since pet, bosses, pets dropped)",
+                    hover = "Click to reset all Bal statistics",
                 )
             }
         }

@@ -63,3 +63,4 @@ class BalBossTrackerConfig {
     @ConfigLink(owner = BalBossTrackerConfig::class, field = "enabled")
     val position: Position = Position(20, 140)
 }
+

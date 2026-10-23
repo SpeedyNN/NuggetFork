@@ -46,3 +46,4 @@ class BalBossTrackerTest {
         assertTrue(probAt1000 > 0.36 && probAt1000 < 0.37)
     }
 }
+
