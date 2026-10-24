@@ -160,10 +160,15 @@ object FarmingProfitTracker : SkyHanniBucketedItemTracker<TrackedSource, Farming
         FarmingProfitTrackerCrops.rememberSpecialCropItem(internalName, amount.toLong())
         if (!shouldTrack(TrackedSource.PESTS)) return
         addTrackedItem(TrackedSource.PESTS, internalName, amount.toLong(), message = message)
-        val primitiveStack = NeuItems.getPrimitiveMultiplier(internalName)
-        CropType.getByNameOrNull(primitiveStack.internalName.itemNameWithoutColor)?.let { crop ->
+        val cropDef = FarmingProfitTrackerCrops.run { internalName.getCropTierDefinitionOrNull() }
+        val crop = cropDef?.crop ?: run {
+            val primitiveStack = NeuItems.getPrimitiveMultiplier(internalName)
+            CropType.getByNameOrNull(primitiveStack.internalName.itemNameWithoutColor)
+        }
+        val rawMultiplier = cropDef?.rawMultiplier ?: NeuItems.getPrimitiveMultiplier(internalName).amount.toLong()
+        crop?.let { cropType ->
             modify {
-                it.addCropAmount(crop, TrackedSource.PESTS, primitiveStack.amount * amount.toLong())
+                it.addCropAmount(cropType, TrackedSource.PESTS, rawMultiplier * amount.toLong())
             }
         }
         markActivity()

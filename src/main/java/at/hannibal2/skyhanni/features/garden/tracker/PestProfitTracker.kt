@@ -214,10 +214,13 @@ object PestProfitTracker : SkyHanniBucketedItemTracker<PestType, PestProfitTrack
             val internalName = NeuInternalName.fromItemNameOrNull(group("item")) ?: return
             val amount = group("amount").formatInt()
 
-            val primitiveStack = NeuItems.getPrimitiveMultiplier(internalName)
-            val rawName = primitiveStack.internalName.itemNameWithoutColor
-            CropType.getByNameOrNull(rawName)
-                ?.addCollectionCounter(CropCollectionType.PEST_BASE, primitiveStack.amount * amount.toLong())
+            val cropDef = FarmingProfitTrackerCrops.run { internalName.getCropTierDefinitionOrNull() }
+            val crop = cropDef?.crop ?: run {
+                val primitiveStack = NeuItems.getPrimitiveMultiplier(internalName)
+                CropType.getByNameOrNull(primitiveStack.internalName.itemNameWithoutColor)
+            }
+            val rawMultiplier = cropDef?.rawMultiplier ?: NeuItems.getPrimitiveMultiplier(internalName).amount.toLong()
+            crop?.addCollectionCounter(CropCollectionType.PEST_BASE, rawMultiplier * amount.toLong())
 
             if (config.hideChat) blockedReason = "pest_drop"
 
@@ -242,11 +245,13 @@ object PestProfitTracker : SkyHanniBucketedItemTracker<PestType, PestProfitTrack
 
             addPestItem(pest, internalName, amount)
 
-            val primitiveStack = NeuItems.getPrimitiveMultiplier(internalName)
-            val rawName = primitiveStack.internalName.itemNameWithoutColor
-
-            CropType.getByNameOrNull(rawName)
-                ?.addCollectionCounter(CropCollectionType.PEST_RNG, primitiveStack.amount.toLong() * amount.toLong())
+            val cropDef = FarmingProfitTrackerCrops.run { internalName.getCropTierDefinitionOrNull() }
+            val crop = cropDef?.crop ?: run {
+                val primitiveStack = NeuItems.getPrimitiveMultiplier(internalName)
+                CropType.getByNameOrNull(primitiveStack.internalName.itemNameWithoutColor)
+            }
+            val rawMultiplier = cropDef?.rawMultiplier ?: NeuItems.getPrimitiveMultiplier(internalName).amount.toLong()
+            crop?.addCollectionCounter(CropCollectionType.PEST_RNG, rawMultiplier * amount.toLong())
             // Pests always have guaranteed loot, therefore there's no need to add kill here
         }
 
