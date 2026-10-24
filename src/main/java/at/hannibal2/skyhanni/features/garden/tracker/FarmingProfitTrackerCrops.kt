@@ -222,6 +222,29 @@ object FarmingProfitTrackerCrops {
         put(COMPACTED_WILD_ROSE, CropTierDefinition(CropType.WILD_ROSE, 25600L, setOf(ENCHANTED_WILD_ROSE, WILD_ROSE)))
     }
 
+    val superEnchantedCrops: Set<NeuInternalName> = setOf(
+        ENCHANTED_HAY_BALE,
+        ENCHANTED_HAY_BLOCK,
+        TIGHTLY_TIED_HAY_BALE,
+        BOX_OF_SEEDS,
+        ENCHANTED_GOLDEN_CARROT,
+        ENCHANTED_BAKED_POTATO,
+        MUTANT_NETHER_STALK,
+        POLISHED_PUMPKIN,
+        ENCHANTED_MELON_BLOCK,
+        ENCHANTED_COOKIE,
+        ENCHANTED_SUGAR_CANE,
+        ENCHANTED_CACTUS,
+        ENCHANTED_HUGE_MUSHROOM_1,
+        ENCHANTED_HUGE_MUSHROOM_2,
+        COMPACTED_SUNFLOWER,
+        COMPACTED_MOONFLOWER,
+        COMPACTED_WILD_ROSE,
+    )
+
+    fun NeuInternalName.isSuperEnchantedCrop(): Boolean = this in superEnchantedCrops
+    fun NeuInternalName.isCropVariant(): Boolean = getCropTierDefinitionOrNull() != null
+
     internal data class CropPrimitiveItem(
         val crop: CropType,
         val rawInternalName: NeuInternalName,
@@ -258,7 +281,7 @@ object FarmingProfitTrackerCrops {
     private fun onCropCollectionAdd(event: CropCollectionAddEvent) {
         val source = event.cropCollectionType.toTrackedSource() ?: return
         if (!FarmingProfitTracker.shouldTrack(source)) return
-        trackCropAmount(event.crop, source, event.amount)
+        trackCropCollectionStats(event.crop, source, event.amount)
     }
 
     @HandleEvent(onlyOnIsland = IslandType.GARDEN)
@@ -299,13 +322,60 @@ object FarmingProfitTrackerCrops {
                 FarmingProfitTracker.run { event.addItemFromEvent() }
             }
 
-            ItemAddManager.Source.ITEM_ADD,
-            ItemAddManager.Source.SACKS,
-            -> trackCropItemFromItemAdd(event)
+            ItemAddManager.Source.SACKS -> trackCropFromSacks(event.internalName, event.amount.toLong())
+
+            ItemAddManager.Source.ITEM_ADD -> trackCropFromInventory(event.internalName, event.amount.toLong())
 
             else -> Unit
         }
     }
+
+    internal fun trackCropFromSacks(internalName: NeuInternalName, amount: Long) {
+        if (!FarmingProfitTracker.config.enabled || amount <= 0) return
+        if (!internalName.isCropVariant()) return
+
+        val source = resolveCropTrackedSource(internalName)
+        if (!FarmingProfitTracker.shouldTrack(source)) return
+
+        FarmingProfitTracker.addTrackedItem(source, internalName, amount, message = false)
+        FarmingProfitTracker.markActivity()
+    }
+
+    internal fun trackCropFromInventory(internalName: NeuInternalName, amount: Long) {
+        if (!FarmingProfitTracker.config.enabled || amount <= 0) return
+        if (!internalName.isSuperEnchantedCrop()) return
+
+        val source = resolveCropTrackedSource(internalName)
+        if (!FarmingProfitTracker.shouldTrack(source)) return
+
+        val consumedSpecial = consumeRecentSpecialCropItem(internalName, amount)
+        val netAmount = amount - consumedSpecial
+        if (netAmount > 0) {
+            FarmingProfitTracker.addTrackedItem(source, internalName, netAmount, message = false)
+            FarmingProfitTracker.markActivity()
+        }
+    }
+
+    internal fun resolveCropTrackedSource(internalName: NeuInternalName): TrackedSource {
+        if (internalName.isMushroom() && GardenApi.getCurrentlyFarmedCrop()?.let { it != CropType.MUSHROOM } == true) {
+            if (FarmingProfitTracker.shouldTrack(TrackedSource.MOOSHROOM_COW)) {
+                return TrackedSource.MOOSHROOM_COW
+            }
+        }
+        return TrackedSource.CROPS
+    }
+
+    internal fun NeuInternalName.isMushroom(): Boolean =
+        this in setOf(
+            RED_MUSHROOM,
+            BROWN_MUSHROOM,
+            HUGE_MUSHROOM_1,
+            HUGE_MUSHROOM_2,
+            ENCHANTED_RED_MUSHROOM,
+            ENCHANTED_BROWN_MUSHROOM,
+            ENCHANTED_HUGE_MUSHROOM_1,
+            ENCHANTED_HUGE_MUSHROOM_2,
+        )
 
     @HandleEvent(onlyOnIsland = IslandType.GARDEN, priority = HandleEvent.LOWEST)
     private fun onSackChange(event: SackChangeEvent) {
@@ -353,7 +423,9 @@ object FarmingProfitTrackerCrops {
             }
             val rawMultiplier = cropDef?.rawMultiplier ?: NeuItems.getPrimitiveMultiplier(internalName).amount.toLong()
 
-            FarmingProfitTracker.addTrackedItem(TrackedSource.BLESSED, internalName, 1L)
+            if (!internalName.isCropVariant()) {
+                FarmingProfitTracker.addTrackedItem(TrackedSource.BLESSED, internalName, 1L)
+            }
             FarmingProfitTracker.modify {
                 it.blessedDrops.addOrPut(internalName, 1)
                 crop?.let { cropType ->
@@ -389,7 +461,9 @@ object FarmingProfitTrackerCrops {
 
             val rawMultiplier = cropDef?.rawMultiplier ?: NeuItems.getPrimitiveMultiplier(internalName).amount.toLong()
 
-            FarmingProfitTracker.addTrackedItem(TrackedSource.CROP_FEVER, internalName, amount.toLong())
+            if (!internalName.isCropVariant()) {
+                FarmingProfitTracker.addTrackedItem(TrackedSource.CROP_FEVER, internalName, amount.toLong())
+            }
             FarmingProfitTracker.modify {
                 it.cropFeverDrops.addOrPut(rarity, 1)
                 it.addCropAmount(crop, TrackedSource.CROP_FEVER, rawMultiplier * amount.toLong())
@@ -408,11 +482,9 @@ object FarmingProfitTrackerCrops {
         FarmingProfitTracker.markActivity()
     }
 
-    private fun trackCropAmount(crop: CropType, source: TrackedSource, amount: Long) {
+    private fun trackCropCollectionStats(crop: CropType, source: TrackedSource, amount: Long) {
         if (amount <= 0) return
         clearSessionStateIfSessionWasReset()
-        val internalName = crop.getCropInternalName()
-        FarmingProfitTracker.addTrackedItem(source, internalName, amount, message = false)
         if (source == TrackedSource.CROPS) applyPendingReplenishCost(crop)
         FarmingProfitTracker.modify {
             it.addCropAmount(crop, source, amount)
@@ -433,19 +505,15 @@ object FarmingProfitTrackerCrops {
         removeTrackedRawCrop(crop.getCropInternalName(), amount)
     }
 
-    private fun trackCropItemFromItemAdd(event: ItemAddEvent) {
-        val anySourceEnabled = CROP_SOURCES.any { FarmingProfitTracker.shouldTrack(it) }
-        if (!FarmingProfitTracker.config.enabled || !anySourceEnabled || event.amount <= 0) return
-        val consumedSpecial = consumeRecentSpecialCropItem(event.internalName, event.amount.toLong())
-        val amount = event.amount.toLong() - consumedSpecial
-        if (amount > 0) {
-            processCropCompaction(event.internalName, amount)
-        }
-    }
-
     private fun checkSuperCraft(message: String) {
         val crafted = SuperCraftFeatures.parseCraftedItem(message) ?: return
-        processCropCompaction(crafted.internalName, crafted.amount.toLong())
+        if (crafted.internalName.isSuperEnchantedCrop()) {
+            val source = resolveCropTrackedSource(crafted.internalName)
+            if (!FarmingProfitTracker.config.enabled || !FarmingProfitTracker.shouldTrack(source) || crafted.amount <= 0) return
+            rememberSpecialCropItem(crafted.internalName, crafted.amount.toLong())
+            FarmingProfitTracker.addTrackedItem(source, crafted.internalName, crafted.amount.toLong(), message = false)
+            FarmingProfitTracker.markActivity()
+        }
     }
 
     internal fun processCropCompaction(internalName: NeuInternalName, amount: Long) {

@@ -582,4 +582,75 @@ class FarmingProfitTrackerCropsTest {
         assertTrue(enchantedWheat in hayBaleDef.validCandidates)
         assertTrue(seeds !in hayBaleDef.validCandidates, "Seeds must never be candidate for wheat")
     }
+
+    @Test
+    fun `isCropVariant identifies crop items across all tiers and rejects non-crop items`() {
+        FarmingProfitTrackerCrops.run {
+            // Raw crops
+            assertTrue(melon.isCropVariant())
+            assertTrue(wheat.isCropVariant())
+            assertTrue(carrot.isCropVariant())
+            assertTrue(seeds.isCropVariant())
+
+            // Enchanted crops
+            assertTrue(enchantedMelon.isCropVariant())
+            assertTrue(enchantedWheat.isCropVariant())
+            assertTrue(enchantedCarrot.isCropVariant())
+            assertTrue(enchantedSeeds.isCropVariant())
+
+            // Super-enchanted crops
+            assertTrue(enchantedMelonBlock.isCropVariant())
+            assertTrue(enchantedHayBale.isCropVariant())
+            assertTrue(enchantedGoldenCarrot.isCropVariant())
+            assertTrue(boxOfSeeds.isCropVariant())
+
+            // Non-crop items
+            assertTrue(!"OVERCLOCKER_3000".toInternalName().isCropVariant())
+            assertTrue(!"CROPIE".toInternalName().isCropVariant())
+            assertTrue(!"SQUASH".toInternalName().isCropVariant())
+            assertTrue(!"FERMENTO".toInternalName().isCropVariant())
+            assertTrue(!"DUNG".toInternalName().isCropVariant())
+            assertTrue(!"TOOL_EXP_CAPSULE".toInternalName().isCropVariant())
+        }
+    }
+
+    @Test
+    fun `isSuperEnchantedCrop identifies only highest tier products and rejects raw and enchanted forms`() {
+        FarmingProfitTrackerCrops.run {
+            // Super-enchanted items must be true
+            assertTrue(enchantedMelonBlock.isSuperEnchantedCrop())
+            assertTrue(enchantedHayBale.isSuperEnchantedCrop())
+            assertTrue(boxOfSeeds.isSuperEnchantedCrop())
+            assertTrue(enchantedGoldenCarrot.isSuperEnchantedCrop())
+            assertTrue(enchantedBakedPotato.isSuperEnchantedCrop())
+            assertTrue(mutantNetherStalk.isSuperEnchantedCrop())
+            assertTrue(polishedPumpkin.isSuperEnchantedCrop())
+            assertTrue(enchantedCookie.isSuperEnchantedCrop())
+            assertTrue(enchantedSugarCane.isSuperEnchantedCrop())
+            assertTrue(enchantedCactus.isSuperEnchantedCrop())
+            assertTrue(enchantedHugeMushroom1.isSuperEnchantedCrop())
+            assertTrue(enchantedHugeMushroom2.isSuperEnchantedCrop())
+            assertTrue(compactedSunflower.isSuperEnchantedCrop())
+            assertTrue(compactedMoonflower.isSuperEnchantedCrop())
+            assertTrue(compactedWildRose.isSuperEnchantedCrop())
+
+            // Raw items must be false
+            assertTrue(!melon.isSuperEnchantedCrop())
+            assertTrue(!wheat.isSuperEnchantedCrop())
+            assertTrue(!seeds.isSuperEnchantedCrop())
+            assertTrue(!carrot.isSuperEnchantedCrop())
+            assertTrue(!potato.isSuperEnchantedCrop())
+            assertTrue(!netherStalk.isSuperEnchantedCrop())
+            assertTrue(!pumpkin.isSuperEnchantedCrop())
+
+            // Intermediate enchanted items must be false
+            assertTrue(!enchantedMelon.isSuperEnchantedCrop(), "Enchanted melon slice is not super-enchanted")
+            assertTrue(!enchantedWheat.isSuperEnchantedCrop())
+            assertTrue(!enchantedSeeds.isSuperEnchantedCrop())
+            assertTrue(!enchantedCarrot.isSuperEnchantedCrop())
+            assertTrue(!enchantedPotato.isSuperEnchantedCrop())
+            assertTrue(!enchantedNetherStalk.isSuperEnchantedCrop())
+            assertTrue(!enchantedPumpkin.isSuperEnchantedCrop())
+        }
+    }
 }
