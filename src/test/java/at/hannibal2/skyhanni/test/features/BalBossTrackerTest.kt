@@ -71,30 +71,11 @@ class BalBossTrackerTest {
     }
 
     @Test
-    fun `test boss health bar bounds and resets`() {
-        assertEquals(200, BalBossTracker.BAL_MAX_HP)
+    fun `test session reset and all stats reset`() {
+        BalBossTracker.resetSessionHits()
+        assertEquals(0L, BalBossTracker.sessionHits)
 
-        // Test custom HP clamp
-        BalBossTracker.resetBossHp(250)
-        assertEquals(200, BalBossTracker.balCurrentHp)
-
-        BalBossTracker.resetBossHp(-10)
-        assertEquals(0, BalBossTracker.balCurrentHp)
-
-        BalBossTracker.resetBossHp(100)
-        assertEquals(100, BalBossTracker.balCurrentHp)
-
-        // Reset to full
-        BalBossTracker.resetBossHp(BalBossTracker.BAL_MAX_HP)
-        assertEquals(200, BalBossTracker.balCurrentHp)
-
-        // Test defeat state: 0 HP
-        BalBossTracker.resetBossHp(0)
-        assertEquals(0, BalBossTracker.balCurrentHp)
-
-        // Reset all stats should restore full 200 HP
         BalBossTracker.resetAllStats()
-        assertEquals(200, BalBossTracker.balCurrentHp)
+        assertEquals(0L, BalBossTracker.sessionHits)
     }
 }
-

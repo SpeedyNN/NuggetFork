@@ -11,7 +11,10 @@ import io.github.notenoughupdates.moulconfig.annotations.ConfigOption
 
 class BalBossTrackerConfig {
     @Expose
-    @ConfigOption(name = "Enabled", desc = "Enable the Bal Boss & Pet Tracker.")
+    @ConfigOption(
+        name = "Enabled",
+        desc = "Enable the Bal Boss & Pet Tracker.\n\n§cNote: This counter is very much an approximation and can be inaccurate due to server-side hit registration, projectile spreads, and i-frames.",
+    )
     @ConfigEditorBoolean
     @FeatureToggle
     var enabled: Boolean = true
@@ -27,22 +30,18 @@ class BalBossTrackerConfig {
     var onlyInKhazadDum: Boolean = false
 
     @Expose
-    @ConfigOption(name = "Show Boss Health in Tracker", desc = "Display Bal's current health line inside the tracker HUD.")
-    @ConfigEditorBoolean
-    var showBossHealthInTracker: Boolean = true
-
-    @Expose
-    @ConfigOption(name = "Show Boss Health Bar", desc = "Display an on-screen visual health bar for the Bal boss.")
-    @ConfigEditorBoolean
-    var showBossHealthBar: Boolean = true
-
-    @Expose
-    @ConfigOption(name = "Show Session Hits", desc = "Display total registered hits on Bal for this session.")
+    @ConfigOption(
+        name = "Show Session Hits",
+        desc = "Display registered hits on Bal for this session (§eapproximate counter§r).",
+    )
     @ConfigEditorBoolean
     var showSessionHits: Boolean = true
 
     @Expose
-    @ConfigOption(name = "Show Hits Since Last Pet", desc = "Display registered hits and cumulative probability since last Bal Pet drop.")
+    @ConfigOption(
+        name = "Show Hits Since Last Pet",
+        desc = "Display registered hits and cumulative probability since last Bal Pet drop (§eapproximate counter§r).",
+    )
     @ConfigEditorBoolean
     var showHitsSinceLastPet: Boolean = true
 
@@ -73,10 +72,6 @@ class BalBossTrackerConfig {
     @ConfigEditorButton(buttonText = "Reset")
     val resetSession: Runnable = Runnable { BalBossTracker.resetSessionHits() }
 
-    @ConfigOption(name = "Reset Boss Health", desc = "Reset Bal's current health back to 200.")
-    @ConfigEditorButton(buttonText = "Reset HP")
-    val resetHp: Runnable = Runnable { BalBossTracker.resetBossHp() }
-
     @ConfigOption(name = "Reset All Bal Stats", desc = "Reset all Bal tracking statistics (hits since pet, bosses, pets dropped).")
     @ConfigEditorButton(buttonText = "Reset All")
     val resetAll: Runnable = Runnable { BalBossTracker.resetAllStats() }
@@ -84,8 +79,4 @@ class BalBossTrackerConfig {
     @Expose
     @ConfigLink(owner = BalBossTrackerConfig::class, field = "enabled")
     val position: Position = Position(20, 140)
-
-    @Expose
-    @ConfigLink(owner = BalBossTrackerConfig::class, field = "showBossHealthBar")
-    val bossBarPosition: Position = Position(200, 20)
 }
