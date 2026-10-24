@@ -46,11 +46,17 @@ object FarmingProfitTrackerCrops {
 
     // Wheat
     val WHEAT = "WHEAT".toInternalName()
-    val HAY_BLOCK = "HAY_BLOCK".toInternalName()
-    val ENCHANTED_HAY_BLOCK = "ENCHANTED_HAY_BLOCK".toInternalName()
+    val ENCHANTED_WHEAT = "ENCHANTED_WHEAT".toInternalName()
     val ENCHANTED_HAY_BALE = "ENCHANTED_HAY_BALE".toInternalName()
+    val ENCHANTED_HAY_BLOCK = "ENCHANTED_HAY_BLOCK".toInternalName()
+    val HAY_BLOCK = "HAY_BLOCK".toInternalName()
     val TIGHTLY_TIED_HAY_BALE = "TIGHTLY_TIED_HAY_BALE".toInternalName()
     val ENCHANTED_BREAD = "ENCHANTED_BREAD".toInternalName()
+
+    // Seeds
+    val SEEDS = "SEEDS".toInternalName()
+    val ENCHANTED_SEEDS = "ENCHANTED_SEEDS".toInternalName()
+    val BOX_OF_SEEDS = "BOX_OF_SEEDS".toInternalName()
 
     // Carrot
     val CARROT_ITEM = "CARROT_ITEM".toInternalName()
@@ -74,9 +80,9 @@ object FarmingProfitTrackerCrops {
 
     // Melon
     val MELON = "MELON".toInternalName()
-    val MELON_BLOCK = "MELON_BLOCK".toInternalName()
     val ENCHANTED_MELON = "ENCHANTED_MELON".toInternalName()
     val ENCHANTED_MELON_BLOCK = "ENCHANTED_MELON_BLOCK".toInternalName()
+    val MELON_BLOCK = "MELON_BLOCK".toInternalName()
     val ENCHANTED_GLISTERING_MELON = "ENCHANTED_GLISTERING_MELON".toInternalName()
 
     // Cocoa Beans
@@ -132,11 +138,17 @@ object FarmingProfitTrackerCrops {
     private val cropTierDefinitions: Map<NeuInternalName, CropTierDefinition> = buildMap {
         // Wheat
         put(WHEAT, CropTierDefinition(CropType.WHEAT, 1L))
+        put(ENCHANTED_WHEAT, CropTierDefinition(CropType.WHEAT, 160L, setOf(WHEAT)))
+        put(ENCHANTED_HAY_BALE, CropTierDefinition(CropType.WHEAT, 25600L, setOf(ENCHANTED_WHEAT, WHEAT, HAY_BLOCK)))
+        put(ENCHANTED_HAY_BLOCK, CropTierDefinition(CropType.WHEAT, 25600L, setOf(ENCHANTED_WHEAT, WHEAT, HAY_BLOCK)))
         put(HAY_BLOCK, CropTierDefinition(CropType.WHEAT, 9L, setOf(WHEAT)))
-        put(ENCHANTED_HAY_BLOCK, CropTierDefinition(CropType.WHEAT, 1296L, setOf(HAY_BLOCK, WHEAT)))
-        put(ENCHANTED_HAY_BALE, CropTierDefinition(CropType.WHEAT, 1296L, setOf(HAY_BLOCK, WHEAT)))
-        put(TIGHTLY_TIED_HAY_BALE, CropTierDefinition(CropType.WHEAT, 207360L, setOf(ENCHANTED_HAY_BLOCK, ENCHANTED_HAY_BALE, HAY_BLOCK, WHEAT)))
+        put(TIGHTLY_TIED_HAY_BALE, CropTierDefinition(CropType.WHEAT, 25600L * 160L, setOf(ENCHANTED_HAY_BALE, ENCHANTED_HAY_BLOCK, ENCHANTED_WHEAT, HAY_BLOCK, WHEAT)))
         put(ENCHANTED_BREAD, CropTierDefinition(CropType.WHEAT, 60L, setOf(WHEAT)))
+
+        // Seeds
+        put(SEEDS, CropTierDefinition(CropType.WHEAT, 1L))
+        put(ENCHANTED_SEEDS, CropTierDefinition(CropType.WHEAT, 160L, setOf(SEEDS)))
+        put(BOX_OF_SEEDS, CropTierDefinition(CropType.WHEAT, 25600L, setOf(ENCHANTED_SEEDS, SEEDS)))
 
         // Carrot
         put(CARROT_ITEM, CropTierDefinition(CropType.CARROT, 1L))
@@ -160,10 +172,10 @@ object FarmingProfitTrackerCrops {
 
         // Melon
         put(MELON, CropTierDefinition(CropType.MELON, 1L))
+        put(ENCHANTED_MELON, CropTierDefinition(CropType.MELON, 160L, setOf(MELON, MELON_BLOCK)))
+        put(ENCHANTED_MELON_BLOCK, CropTierDefinition(CropType.MELON, 25600L, setOf(ENCHANTED_MELON, MELON, MELON_BLOCK)))
+        put(ENCHANTED_GLISTERING_MELON, CropTierDefinition(CropType.MELON, 160L, setOf(ENCHANTED_MELON, MELON, MELON_BLOCK)))
         put(MELON_BLOCK, CropTierDefinition(CropType.MELON, 9L, setOf(MELON)))
-        put(ENCHANTED_MELON, CropTierDefinition(CropType.MELON, 1440L, setOf(MELON_BLOCK, MELON)))
-        put(ENCHANTED_MELON_BLOCK, CropTierDefinition(CropType.MELON, 230400L, setOf(ENCHANTED_MELON, MELON_BLOCK, MELON)))
-        put(ENCHANTED_GLISTERING_MELON, CropTierDefinition(CropType.MELON, 1440L, setOf(ENCHANTED_MELON, MELON_BLOCK, MELON)))
 
         // Cocoa Beans
         put(COCOA, CropTierDefinition(CropType.COCOA_BEANS, 1L))

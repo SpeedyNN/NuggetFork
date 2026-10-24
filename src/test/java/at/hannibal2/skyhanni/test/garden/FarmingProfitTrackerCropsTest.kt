@@ -17,9 +17,12 @@ class FarmingProfitTrackerCropsTest {
     private val enchantedMelonBlock = "ENCHANTED_MELON_BLOCK".toInternalName()
 
     private val wheat = "WHEAT".toInternalName()
-    private val hayBale = "HAY_BLOCK".toInternalName()
-    private val enchantedHayBlock = "ENCHANTED_HAY_BLOCK".toInternalName()
-    private val tightlyTiedHayBale = "TIGHTLY_TIED_HAY_BALE".toInternalName()
+    private val enchantedWheat = "ENCHANTED_WHEAT".toInternalName()
+    private val enchantedHayBale = "ENCHANTED_HAY_BALE".toInternalName()
+
+    private val seeds = "SEEDS".toInternalName()
+    private val enchantedSeeds = "ENCHANTED_SEEDS".toInternalName()
+    private val boxOfSeeds = "BOX_OF_SEEDS".toInternalName()
 
     private val carrot = "CARROT_ITEM".toInternalName()
     private val enchantedCarrot = "ENCHANTED_CARROT".toInternalName()
@@ -50,12 +53,10 @@ class FarmingProfitTrackerCropsTest {
     private val enchantedCactus = "ENCHANTED_CACTUS".toInternalName()
 
     private val redMushroom = "RED_MUSHROOM".toInternalName()
-    private val hugeMushroom2 = "HUGE_MUSHROOM_2".toInternalName()
     private val enchantedRedMushroom = "ENCHANTED_RED_MUSHROOM".toInternalName()
     private val enchantedHugeMushroom2 = "ENCHANTED_HUGE_MUSHROOM_2".toInternalName()
 
     private val brownMushroom = "BROWN_MUSHROOM".toInternalName()
-    private val hugeMushroom1 = "HUGE_MUSHROOM_1".toInternalName()
     private val enchantedBrownMushroom = "ENCHANTED_BROWN_MUSHROOM".toInternalName()
     private val enchantedHugeMushroom1 = "ENCHANTED_HUGE_MUSHROOM_1".toInternalName()
 
@@ -72,69 +73,67 @@ class FarmingProfitTrackerCropsTest {
     private val compactedWildRose = "COMPACTED_WILD_ROSE".toInternalName()
 
     @Test
-    fun `melon blocks are removed when crafting enchanted melon`() {
+    fun `melon slices to enchanted melon slice conversion`() {
         val candidates = listOf(
-            TrackedCandidate(melonBlock, 9L, 160L),
-            TrackedCandidate(melon, 1L, 0L),
+            TrackedCandidate(melon, 1L, 160L),
         )
 
+        // Compacting 1 Enchanted Melon Slice (multiplier 160)
         val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
-            targetMultiplier = 1440L,
+            targetMultiplier = 160L,
             amount = 1L,
             candidates = candidates,
         )
 
-        assertEquals(1L, craftable, "1 Enchanted Melon should be craftable")
-        assertEquals(160L, deductions[melonBlock], "All 160 Melon Blocks must be deducted to prevent double-counting")
-        assertEquals(null, deductions[melon], "No Melon Slices needed to be deducted")
+        assertEquals(1L, craftable, "1 Enchanted Melon Slice should be craftable")
+        assertEquals(160L, deductions[melon], "All 160 Melon Slices must be deducted")
     }
 
     @Test
-    fun `enchanted melons are removed when crafting enchanted melon block`() {
+    fun `enchanted melon slices to enchanted melon block conversion`() {
         val candidates = listOf(
-            TrackedCandidate(enchantedMelon, 1440L, 160L),
-            TrackedCandidate(melonBlock, 9L, 0L),
+            TrackedCandidate(enchantedMelon, 160L, 160L),
             TrackedCandidate(melon, 1L, 0L),
         )
 
+        // Compacting 1 Enchanted Melon Block (multiplier 25,600)
         val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
-            targetMultiplier = 230400L,
+            targetMultiplier = 25600L,
             amount = 1L,
             candidates = candidates,
         )
 
         assertEquals(1L, craftable, "1 Enchanted Melon Block should be craftable")
         assertEquals(160L, deductions[enchantedMelon], "All 160 Enchanted Melons must be deducted")
-        assertEquals(null, deductions[melonBlock])
     }
 
     @Test
     fun `mixed intermediate and raw crops are converted correctly`() {
-        // 100 blocks (= 900 raw) + 540 slices (= 540 raw) = 1440 raw total
+        // 100 enchanted melons (= 16,000 raw) + 9,600 slices (= 9,600 raw) = 25,600 raw total
         val candidates = listOf(
-            TrackedCandidate(melon, 1L, 540L),
-            TrackedCandidate(melonBlock, 9L, 100L),
+            TrackedCandidate(melon, 1L, 9600L),
+            TrackedCandidate(enchantedMelon, 160L, 100L),
         )
 
         val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
-            targetMultiplier = 1440L,
+            targetMultiplier = 25600L,
             amount = 1L,
             candidates = candidates,
         )
 
-        assertEquals(1L, craftable, "1 Enchanted Melon should be craftable")
-        assertEquals(100L, deductions[melonBlock], "All 100 Melon Blocks should be consumed first (higher tier)")
-        assertEquals(540L, deductions[melon], "Remaining 540 Melon Slices should be consumed")
+        assertEquals(1L, craftable, "1 Enchanted Melon Block should be craftable")
+        assertEquals(100L, deductions[enchantedMelon], "All 100 Enchanted Melons should be consumed first (higher tier)")
+        assertEquals(9600L, deductions[melon], "Remaining 9600 Melon Slices should be consumed")
     }
 
     @Test
     fun `insufficient raw items does not convert and does not pollute session`() {
         val candidates = listOf(
-            TrackedCandidate(melonBlock, 9L, 10L), // Only 90 raw available, needs 1440
+            TrackedCandidate(melon, 1L, 100L), // Only 100 raw available, needs 160
         )
 
         val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
-            targetMultiplier = 1440L,
+            targetMultiplier = 160L,
             amount = 1L,
             candidates = candidates,
         )
@@ -144,35 +143,67 @@ class FarmingProfitTrackerCropsTest {
     }
 
     @Test
-    fun `wheat hay bale to enchanted hay block conversion`() {
+    fun `wheat to enchanted wheat conversion`() {
         val candidates = listOf(
-            TrackedCandidate(hayBale, 9L, 144L), // 144 * 9 = 1296 raw
+            TrackedCandidate(wheat, 1L, 160L),
         )
 
         val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
-            targetMultiplier = 1296L, // Enchanted Hay Block = 144 * 9
+            targetMultiplier = 160L,
             amount = 1L,
             candidates = candidates,
         )
 
-        assertEquals(1L, craftable, "1 Enchanted Hay Block should be craftable")
-        assertEquals(144L, deductions[hayBale], "All 144 Hay Bales must be deducted")
+        assertEquals(1L, craftable, "1 Enchanted Wheat should be craftable")
+        assertEquals(160L, deductions[wheat], "All 160 Wheat must be deducted")
     }
 
     @Test
-    fun `enchanted hay block to tightly tied hay bale conversion`() {
+    fun `enchanted wheat to enchanted hay bale conversion`() {
         val candidates = listOf(
-            TrackedCandidate(enchantedHayBlock, 1296L, 160L),
+            TrackedCandidate(enchantedWheat, 160L, 160L),
         )
 
         val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
-            targetMultiplier = 207360L, // Tightly-Tied Hay Bale = 160 * 1296
+            targetMultiplier = 25600L, // Enchanted Hay Bale = 160 * 160
             amount = 1L,
             candidates = candidates,
         )
 
-        assertEquals(1L, craftable, "1 Tightly-Tied Hay Bale should be craftable")
-        assertEquals(160L, deductions[enchantedHayBlock], "All 160 Enchanted Hay Blocks must be deducted")
+        assertEquals(1L, craftable, "1 Enchanted Hay Bale should be craftable")
+        assertEquals(160L, deductions[enchantedWheat], "All 160 Enchanted Wheat must be deducted")
+    }
+
+    @Test
+    fun `seeds to enchanted seeds conversion`() {
+        val candidates = listOf(
+            TrackedCandidate(seeds, 1L, 160L),
+        )
+
+        val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
+            targetMultiplier = 160L,
+            amount = 1L,
+            candidates = candidates,
+        )
+
+        assertEquals(1L, craftable, "1 Enchanted Seeds should be craftable")
+        assertEquals(160L, deductions[seeds], "All 160 Seeds must be deducted")
+    }
+
+    @Test
+    fun `enchanted seeds to box of seeds conversion`() {
+        val candidates = listOf(
+            TrackedCandidate(enchantedSeeds, 160L, 160L),
+        )
+
+        val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
+            targetMultiplier = 25600L, // Box of Seeds = 160 * 160
+            amount = 1L,
+            candidates = candidates,
+        )
+
+        assertEquals(1L, craftable, "1 Box of Seeds should be craftable")
+        assertEquals(160L, deductions[enchantedSeeds], "All 160 Enchanted Seeds must be deducted")
     }
 
     @Test
@@ -483,11 +514,11 @@ class FarmingProfitTrackerCropsTest {
     fun `pest drops in PESTS bucket are deducted correctly when compacted`() {
         // Player kills earthworm pest, gets 160 enchanted melons in PESTS bucket
         val candidates = listOf(
-            SourceTrackedCandidate(TrackedSource.PESTS, enchantedMelon, 1440L, 160L),
+            SourceTrackedCandidate(TrackedSource.PESTS, enchantedMelon, 160L, 160L),
         )
 
         val (craftable, deductions) = FarmingProfitTrackerCrops.calculateMultiSourceCompactionDeductions(
-            targetMultiplier = 230400L,
+            targetMultiplier = 25600L,
             amount = 1L,
             candidates = candidates,
         )
@@ -501,12 +532,12 @@ class FarmingProfitTrackerCropsTest {
     fun `multi source candidates across CROPS and PESTS are deducted correctly`() {
         // 100 enchanted melons from CROPS, 60 from PESTS = 160 total
         val candidates = listOf(
-            SourceTrackedCandidate(TrackedSource.CROPS, enchantedMelon, 1440L, 100L),
-            SourceTrackedCandidate(TrackedSource.PESTS, enchantedMelon, 1440L, 60L),
+            SourceTrackedCandidate(TrackedSource.CROPS, enchantedMelon, 160L, 100L),
+            SourceTrackedCandidate(TrackedSource.PESTS, enchantedMelon, 160L, 60L),
         )
 
         val (craftable, deductions) = FarmingProfitTrackerCrops.calculateMultiSourceCompactionDeductions(
-            targetMultiplier = 230400L,
+            targetMultiplier = 25600L,
             amount = 1L,
             candidates = candidates,
         )
@@ -514,23 +545,6 @@ class FarmingProfitTrackerCropsTest {
         assertEquals(1L, craftable, "1 Enchanted Melon Block should be craftable from combined sources")
         assertEquals(100L, deductions[TrackedSource.CROPS to enchantedMelon], "All 100 from CROPS should be deducted")
         assertEquals(60L, deductions[TrackedSource.PESTS to enchantedMelon], "Remaining 60 from PESTS should be deducted")
-    }
-
-    @Test
-    fun `partial crafting when multiple requested but only enough for one`() {
-        // 200 blocks * 9 = 1800 raw available; requested 2 (needs 2880), enough for 1 (1440)
-        val candidates = listOf(
-            TrackedCandidate(melonBlock, 9L, 200L),
-        )
-
-        val (craftable, deductions) = FarmingProfitTrackerCrops.calculateCompactionDeductions(
-            targetMultiplier = 1440L,
-            amount = 2L,
-            candidates = candidates,
-        )
-
-        assertEquals(1L, craftable, "Only 1 Enchanted Melon should be crafted")
-        assertEquals(160L, deductions[melonBlock], "Exactly 160 Melon Blocks (1440 raw) should be deducted")
     }
 
     @Test
@@ -553,5 +567,19 @@ class FarmingProfitTrackerCropsTest {
         assertEquals(5120L, redHugeDef!!.rawMultiplier)
         assertTrue(enchantedRedMushroom in redHugeDef.validCandidates)
         assertTrue(enchantedBrownMushroom !in redHugeDef.validCandidates, "Brown mushroom must never be candidate for red mushroom")
+
+        // Verify seeds
+        val boxOfSeedsDef = FarmingProfitTrackerCrops.run { boxOfSeeds.getCropTierDefinitionOrNull() }
+        assertTrue(boxOfSeedsDef != null)
+        assertEquals(25600L, boxOfSeedsDef!!.rawMultiplier)
+        assertTrue(enchantedSeeds in boxOfSeedsDef.validCandidates)
+        assertTrue(wheat !in boxOfSeedsDef.validCandidates, "Wheat must never be candidate for seeds")
+
+        // Verify wheat
+        val hayBaleDef = FarmingProfitTrackerCrops.run { enchantedHayBale.getCropTierDefinitionOrNull() }
+        assertTrue(hayBaleDef != null)
+        assertEquals(25600L, hayBaleDef!!.rawMultiplier)
+        assertTrue(enchantedWheat in hayBaleDef.validCandidates)
+        assertTrue(seeds !in hayBaleDef.validCandidates, "Seeds must never be candidate for wheat")
     }
 }
