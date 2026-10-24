@@ -9,12 +9,14 @@ import at.hannibal2.skyhanni.data.HypixelData
 import at.hannibal2.skyhanni.data.IslandType
 import at.hannibal2.skyhanni.data.ProfileStorageData
 import at.hannibal2.skyhanni.data.model.SkyblockStat
+import at.hannibal2.skyhanni.events.IslandChangeEvent
 import at.hannibal2.skyhanni.events.MobEvent
 import at.hannibal2.skyhanni.events.SecondPassedEvent
 import at.hannibal2.skyhanni.events.chat.SkyHanniChatEvent
 import at.hannibal2.skyhanni.events.entity.EntityClickEvent
 import at.hannibal2.skyhanni.events.entity.EntityDeathEvent
 import at.hannibal2.skyhanni.events.entity.EntityHurtEvent
+import at.hannibal2.skyhanni.events.minecraft.WorldChangeEvent
 import at.hannibal2.skyhanni.events.minecraft.packet.PacketReceivedEvent
 import at.hannibal2.skyhanni.events.minecraft.packet.PacketSentEvent
 import at.hannibal2.skyhanni.events.player.ClickAction
@@ -52,6 +54,7 @@ import at.hannibal2.skyhanni.utils.renderables.Renderable
 import at.hannibal2.skyhanni.utils.renderables.container.VerticalContainerRenderable.Companion.vertical
 import at.hannibal2.skyhanni.utils.renderables.primitives.text
 import at.hannibal2.skyhanni.utils.repopatterns.RepoPattern
+import net.minecraft.client.Minecraft
 import net.minecraft.network.protocol.game.ClientboundEntityEventPacket
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket
 import net.minecraft.network.protocol.game.ServerboundAttackPacket
@@ -130,18 +133,18 @@ object BalBossTracker {
         private set
 
     private var currentBossHits: Int = 0
-    private var pendingPlayerHits: Int = 0
-    private var lastPlayerVolleySize: Int = 1
-    private var lastOtherPlayerVolleySize: Int = 1
-    private var lastPlayerAttackTime = SimpleTimeMark.farPast()
-    private var lastPlayerShotTime = SimpleTimeMark.farPast()
+    private var pendingMeleeHits: Int = 0
+    private var pendingRangedHits: Int = 0
+    private var lastMeleeAttackTime = SimpleTimeMark.farPast()
+    private var lastShotTime = SimpleTimeMark.farPast()
     private var lastOtherPlayerAttackTime = SimpleTimeMark.farPast()
+    private var lastOtherPlayerVolleySize: Int = 1
     private var lastBalDamageTime = SimpleTimeMark.farPast()
-    private var lastRegisteredHitTime = SimpleTimeMark.farPast()
     private var lastBalDefeatedTime = SimpleTimeMark.farPast()
     private var lastBalSeenTime = SimpleTimeMark.farPast()
 
     private var cachedBalId: Int? = null
+    private val defeatedBalEntityIds = mutableSetOf<Int>()
 
     private var display = listOf<Renderable>()
     private var bossBarDisplay = listOf<Renderable>()
@@ -218,8 +221,8 @@ object BalBossTracker {
         if (config.onlyInKhazadDum && !inKhazadDum()) return false
         if (config.onlyInCrystalHollows && !IslandType.CRYSTAL_HOLLOWS.isInIsland()) return false
         if (findBalEntity() != null) return true
-        if (lastBalDefeatedTime.passedSince() < 8.seconds && inKhazadDum()) return true
-        return inKhazadDum() && lastBalSeenTime.passedSince() < 25.seconds
+        if (lastBalDefeatedTime.passedSince() < 12.seconds && inKhazadDum()) return true
+        return false
     }
 
     private fun inKhazadDum(): Boolean {
@@ -229,11 +232,14 @@ object BalBossTracker {
     }
 
     fun isBal(entity: Entity): Boolean {
+        if (entity.id in defeatedBalEntityIds) return false
         if (cachedBalId != null && entity.id == cachedBalId) return true
         if (entity is MagmaCube) {
+            // Minion magma cubes are size 1 or 2; Bal is size 8 to 12
+            if (entity.size >= 4) return true
             val width = entity.boundingBox.maxX - entity.boundingBox.minX
             val height = entity.boundingBox.maxY - entity.boundingBox.minY
-            if (entity.size >= 12 || width >= 3.5 || height >= 3.5) return true
+            if (width >= 2.0 || height >= 2.0) return true
 
             if (hasNearbyBalArmorStand(entity)) return true
 
@@ -267,25 +273,48 @@ object BalBossTracker {
     fun findBalEntity(): MagmaCube? {
         if (!IslandType.CRYSTAL_HOLLOWS.isInIsland()) return null
         cachedBalId?.let { id ->
-            val entity = MinecraftCompat.localWorldOrNull?.getEntity(id) as? MagmaCube
-            if (entity != null && !entity.isRemoved && isBal(entity)) return entity
-        }
-        val bal = EntityUtils.getEntities<MagmaCube>()
-            .filter { isBal(it) && !it.isRemoved }
-            .maxByOrNull { it.size }
-
-        if (bal != null) {
-            if (cachedBalId != bal.id) {
-                cachedBalId = bal.id
-                // New Bal entity found! Reset HP to 200
-                balCurrentHp = BAL_MAX_HP
-                currentBossHits = 0
-                pendingPlayerHits = 0
-                update()
-                updateBossBar()
+            if (id in defeatedBalEntityIds) {
+                cachedBalId = null
+            } else {
+                val entity = MinecraftCompat.localWorldOrNull?.getEntity(id) as? MagmaCube
+                if (entity != null && !entity.isRemoved && !entity.isDeadOrDying && entity.deathTime == 0 && isBal(entity)) {
+                    return entity
+                }
             }
         }
+        val bal = EntityUtils.getEntities<MagmaCube>()
+            .filter {
+                it.id !in defeatedBalEntityIds &&
+                    !it.isRemoved &&
+                    !it.isDeadOrDying &&
+                    it.deathTime == 0 &&
+                    isBal(it)
+            }
+            .maxByOrNull { it.size }
+
+        if (bal != null && cachedBalId != bal.id) {
+            handleBalSpawn(bal)
+        }
         return bal
+    }
+
+    private fun handleBalSpawn(bal: MagmaCube) {
+        cachedBalId = bal.id
+        balCurrentHp = BAL_MAX_HP
+        currentBossHits = 0
+        pendingMeleeHits = 0
+        pendingRangedHits = 0
+        lastBalSeenTime = SimpleTimeMark.now()
+        if (defeatedBalEntityIds.size > 20) {
+            defeatedBalEntityIds.clear()
+        }
+        update()
+        updateBossBar()
+        ChatUtils.debug("BalBossTracker: Bal spawned (ID: ${bal.id}), HP reset to 200")
+    }
+
+    private fun isArrowInFlight(arrow: Arrow): Boolean {
+        return !arrow.onGround() && arrow.deltaMovement.lengthSqr() > 0.01
     }
 
     private fun isHoldingBow(): Boolean {
@@ -343,17 +372,16 @@ object BalBossTracker {
         return distToRay <= 10.0
     }
 
-    private fun handlePlayerAttackOnBal() {
-        lastPlayerVolleySize = 1
-        pendingPlayerHits = (pendingPlayerHits + 1).coerceAtMost(20)
-        lastPlayerAttackTime = SimpleTimeMark.now()
+    private fun handlePlayerMeleeAttackOnBal() {
+        if (lastMeleeAttackTime.passedSince() < 200.milliseconds) return
+        lastMeleeAttackTime = SimpleTimeMark.now()
+        pendingMeleeHits = 1
     }
 
     private fun handlePlayerShotAtBal() {
-        val arrows = getOurArrowsPerShot()
-        lastPlayerVolleySize = arrows
-        pendingPlayerHits = (pendingPlayerHits + arrows).coerceAtMost(20)
-        lastPlayerShotTime = SimpleTimeMark.now()
+        if (lastShotTime.passedSince() < 150.milliseconds) return
+        lastShotTime = SimpleTimeMark.now()
+        pendingRangedHits = getOurArrowsPerShot()
     }
 
     private fun checkBowShotAtBal() {
@@ -383,7 +411,7 @@ object BalBossTracker {
 
         val target = event.clickedEntity
         if (isBal(target) || isBalArmorStand(target) || isTargetNearBal(target)) {
-            handlePlayerAttackOnBal()
+            handlePlayerMeleeAttackOnBal()
         }
     }
 
@@ -394,13 +422,13 @@ object BalBossTracker {
             is ServerboundInteractPacket -> {
                 val entity = MinecraftCompat.localWorldOrNull?.getEntity(packet.entityId) ?: return
                 if (isBal(entity) || isBalArmorStand(entity) || isTargetNearBal(entity)) {
-                    handlePlayerAttackOnBal()
+                    handlePlayerMeleeAttackOnBal()
                 }
             }
             is ServerboundAttackPacket -> {
                 val entity = MinecraftCompat.localWorldOrNull?.getEntity(packet.entityId) ?: return
                 if (isBal(entity) || isBalArmorStand(entity) || isTargetNearBal(entity)) {
-                    handlePlayerAttackOnBal()
+                    handlePlayerMeleeAttackOnBal()
                 }
             }
             is ServerboundUseItemPacket -> {
@@ -422,14 +450,14 @@ object BalBossTracker {
                 if (isBal(entity)) {
                     // eventId 3 = death animation, 60 = poof
                     if (packet.eventId == 3.toByte() || packet.eventId == 60.toByte()) {
-                        handleBalDefeated()
+                        handleBalDefeated(entity.id)
                     }
                 }
             }
             is ClientboundRemoveEntitiesPacket -> {
                 cachedBalId?.let { id ->
                     if (packet.entityIds.contains(id)) {
-                        handleBalDefeated()
+                        handleBalDefeated(id)
                     }
                 }
             }
@@ -447,7 +475,7 @@ object BalBossTracker {
 
             // Check if Bal is dead or dying (death animation, deathTime > 0, shrinking, or removed)
             if (bal.deathTime > 0 || bal.isDeadOrDying || bal.isRemoved) {
-                handleBalDefeated()
+                handleBalDefeated(bal.id)
                 return
             }
 
@@ -458,22 +486,17 @@ object BalBossTracker {
                 lastOtherPlayerAttackTime = SimpleTimeMark.now()
                 lastOtherPlayerVolleySize = attackingPlayers.maxOf { getPlayerArrowsPerShot(it) }
             }
-            if (EntityUtils.getEntities<Arrow>().any { !it.owner.isLocalPlayer && it.distanceTo(bal) <= 30.0 }) {
+            if (EntityUtils.getEntities<Arrow>().any { !it.owner.isLocalPlayer && isArrowInFlight(it) && it.distanceTo(bal) <= 30.0 }) {
                 lastOtherPlayerAttackTime = SimpleTimeMark.now()
-            }
-        } else {
-            // Bal entity is not currently in the world
-            if (cachedBalId != null) {
-                // If Bal was previously cached and is now gone/poofed, handle defeat!
-                handleBalDefeated()
             }
         }
 
-        // Expire stale pending hits if player hasn't attacked recently
-        if (lastPlayerAttackTime.passedSince() > 800.milliseconds &&
-            lastPlayerShotTime.passedSince() > 800.milliseconds
-        ) {
-            pendingPlayerHits = 0
+        // Expire stale pending hits if attacks timed out
+        if (pendingMeleeHits > 0 && lastMeleeAttackTime.passedSince() > 500.milliseconds) {
+            pendingMeleeHits = 0
+        }
+        if (pendingRangedHits > 0 && lastShotTime.passedSince() > 1500.milliseconds) {
+            pendingRangedHits = 0
         }
     }
 
@@ -487,61 +510,67 @@ object BalBossTracker {
         val timeSinceLastDamage = lastBalDamageTime.passedSince()
         lastBalDamageTime = SimpleTimeMark.now()
 
-        // Expire stale pending hits (arrows that missed)
-        if (lastPlayerAttackTime.passedSince() > 800.milliseconds &&
-            lastPlayerShotTime.passedSince() > 800.milliseconds
-        ) {
-            pendingPlayerHits = 0
+        // 1. Local Player Melee Attack
+        if (pendingMeleeHits > 0 && lastMeleeAttackTime.passedSince() <= 500.milliseconds) {
+            pendingMeleeHits = 0
+            if (balCurrentHp > 0) {
+                balCurrentHp = (balCurrentHp - 1).coerceAtLeast(0)
+            }
+            registerHit()
+            if (balCurrentHp == 0) {
+                handleBalDefeated(bal.id)
+            } else {
+                update()
+                updateBossBar()
+            }
+            return
         }
 
-        val arrowsNearBal = EntityUtils.getEntities<Arrow>().count { it.distanceTo(bal) <= 12.0 }
-        val hasOurArrow = EntityUtils.getEntities<Arrow>().any { it.owner.isLocalPlayer && it.distanceTo(bal) <= 35.0 }
-
-        // 1. Is this our local player's attack?
-        val isOurHit = pendingPlayerHits > 0 ||
-            lastPlayerAttackTime.passedSince() <= 400.milliseconds ||
-            (hasOurArrow && lastPlayerShotTime.passedSince() <= 1200.milliseconds)
-
-        // 2. Did another player in Khazad-dûm attack Bal?
-        val otherPlayerAttacked = checkOtherPlayerAttack(bal)
-
-        // 3. Rapid damage cannot be DoT (Venomous/Fire Aspect ticks at >= 500ms)
-        val isRapidDamage = timeSinceLastDamage <= 400.milliseconds
-
-        val isRealDamage = isOurHit || otherPlayerAttacked || isRapidDamage
-
-        // Decrement Bal's HP for every valid damage packet
-        if (isRealDamage) {
-            val volleyDamage = when {
-                isOurHit -> minOf(pendingPlayerHits, lastPlayerVolleySize).coerceAtLeast(1)
-                otherPlayerAttacked -> lastOtherPlayerVolleySize.coerceAtLeast(1)
-                else -> 1
+        // 2. Local Player Ranged Attack
+        if (pendingRangedHits > 0 && lastShotTime.passedSince() <= 1200.milliseconds) {
+            val hits = pendingRangedHits
+            pendingRangedHits = 0
+            if (balCurrentHp > 0) {
+                balCurrentHp = (balCurrentHp - hits).coerceAtLeast(0)
             }
-            val damage = maxOf(volleyDamage, minOf(5, arrowsNearBal)).coerceAtLeast(1)
+            repeat(hits) {
+                registerHit()
+            }
+            if (balCurrentHp == 0) {
+                handleBalDefeated(bal.id)
+            } else {
+                update()
+                updateBossBar()
+            }
+            return
+        }
+
+        // 3. Other Player Attack or Rapid Projectile Damage (NOT local player)
+        val otherPlayerAttacked = checkOtherPlayerAttack(bal)
+        val isRapidDamage = timeSinceLastDamage <= 350.milliseconds
+
+        if (otherPlayerAttacked || isRapidDamage) {
+            val otherVolley = if (otherPlayerAttacked && lastOtherPlayerAttackTime.passedSince() <= 600.milliseconds) {
+                lastOtherPlayerVolleySize.coerceAtLeast(1)
+            } else {
+                1
+            }
+            val activeArrows = EntityUtils.getEntities<Arrow>().count { isArrowInFlight(it) && it.distanceTo(bal) <= 12.0 }
+            val damage = maxOf(otherVolley, minOf(5, activeArrows)).coerceAtLeast(1)
 
             if (balCurrentHp > 0) {
                 balCurrentHp = (balCurrentHp - damage).coerceAtLeast(0)
             }
             if (balCurrentHp == 0) {
-                handleBalDefeated()
+                handleBalDefeated(bal.id)
+            } else {
+                update()
+                updateBossBar()
             }
-            update()
-            updateBossBar()
+            return
         }
 
-        // Register hit for our local player
-        if (isOurHit) {
-            val hitsToRegister = if (pendingPlayerHits > 0) {
-                val count = minOf(pendingPlayerHits, lastPlayerVolleySize).coerceAtLeast(1)
-                pendingPlayerHits -= count
-                count
-            } else {
-                1
-            }
-            repeat(hitsToRegister) {
-                registerHit()
-            }
-        }
+        // 4. Otherwise: DoT tick (Venomous, Fire Aspect, Lava, etc.) -> Ignore completely!
     }
 
     @OptIn(AllEntitiesGetter::class)
@@ -560,7 +589,7 @@ object BalBossTracker {
         }
 
         // Check if another player's arrow is flying near Bal
-        if (EntityUtils.getEntities<Arrow>().any { !it.owner.isLocalPlayer && it.distanceTo(bal) <= 30.0 }) {
+        if (EntityUtils.getEntities<Arrow>().any { !it.owner.isLocalPlayer && isArrowInFlight(it) && it.distanceTo(bal) <= 30.0 }) {
             lastOtherPlayerAttackTime = SimpleTimeMark.now()
             return true
         }
@@ -584,9 +613,15 @@ object BalBossTracker {
         update()
     }
 
-    private fun handleBalDefeated() {
+    private fun handleBalDefeated(entityId: Int? = cachedBalId) {
+        if (entityId != null) {
+            defeatedBalEntityIds.add(entityId)
+        }
+        cachedBalId?.let { defeatedBalEntityIds.add(it) }
+
         balCurrentHp = 0
-        pendingPlayerHits = 0
+        pendingMeleeHits = 0
+        pendingRangedHits = 0
         cachedBalId = null
         update()
         updateBossBar()
@@ -595,11 +630,9 @@ object BalBossTracker {
         lastBalDefeatedTime = SimpleTimeMark.now()
 
         val participated = currentBossHits > 0 ||
-            lastPlayerAttackTime.passedSince() < 60.seconds ||
-            lastPlayerShotTime.passedSince() < 60.seconds ||
+            lastMeleeAttackTime.passedSince() < 60.seconds ||
+            lastShotTime.passedSince() < 60.seconds ||
             (inKhazadDum() && (sessionHits > 0 || currentBossHits > 0) && lastBalSeenTime.passedSince() < 60.seconds)
-
-        cachedBalId = null
 
         if (participated) {
             bossesSinceLastPet++
@@ -620,7 +653,16 @@ object BalBossTracker {
         if (!config.enabled) return
         val entity = event.entity
         if (entity.id == cachedBalId || (entity is MagmaCube && isBal(entity))) {
-            handleBalDefeated()
+            handleBalDefeated(entity.id)
+        }
+    }
+
+    @HandleEvent(onlyOnIsland = IslandType.CRYSTAL_HOLLOWS)
+    fun onMobSpawn(event: MobEvent.Spawn) {
+        if (!config.enabled) return
+        val entity = event.mob.baseEntity
+        if (entity is MagmaCube && isBal(entity) && entity.id !in defeatedBalEntityIds) {
+            handleBalSpawn(entity)
         }
     }
 
@@ -628,8 +670,32 @@ object BalBossTracker {
     fun onMobDespawn(event: MobEvent.DeSpawn) {
         if (!config.enabled) return
         if (event.mob.baseEntity.id == cachedBalId && isBal(event.mob.baseEntity)) {
-            handleBalDefeated()
+            handleBalDefeated(event.mob.baseEntity.id)
         }
+    }
+
+    @HandleEvent
+    fun onWorldChange(event: WorldChangeEvent) {
+        defeatedBalEntityIds.clear()
+        cachedBalId = null
+        balCurrentHp = BAL_MAX_HP
+        pendingMeleeHits = 0
+        pendingRangedHits = 0
+        currentBossHits = 0
+        update()
+        updateBossBar()
+    }
+
+    @HandleEvent
+    fun onIslandChange(event: IslandChangeEvent) {
+        defeatedBalEntityIds.clear()
+        cachedBalId = null
+        balCurrentHp = BAL_MAX_HP
+        pendingMeleeHits = 0
+        pendingRangedHits = 0
+        currentBossHits = 0
+        update()
+        updateBossBar()
     }
 
     @HandleEvent(onlyOnIsland = IslandType.CRYSTAL_HOLLOWS)
@@ -703,16 +769,24 @@ object BalBossTracker {
             (cleanMsg.contains("Topaz Crystal", ignoreCase = true) && (cleanMsg.contains("unlocked", ignoreCase = true) || cleanMsg.contains("claimed", ignoreCase = true)))
 
         if (isDefeatMsg) {
-            handleBalDefeated()
+            handleBalDefeated(cachedBalId)
         }
 
         // Spawn Messages
         if (cleanMsg.contains("Bal", ignoreCase = true) &&
-            (cleanMsg.contains("has spawned", ignoreCase = true) || cleanMsg.contains("spawned!", ignoreCase = true) || cleanMsg.contains("awakened", ignoreCase = true))
+            (cleanMsg.contains("has spawned", ignoreCase = true) ||
+             cleanMsg.contains("spawned!", ignoreCase = true) ||
+             cleanMsg.contains("has awakened", ignoreCase = true) ||
+             cleanMsg.contains("awakened!", ignoreCase = true) ||
+             cleanMsg.contains("has arisen", ignoreCase = true))
         ) {
             balCurrentHp = BAL_MAX_HP
             currentBossHits = 0
-            pendingPlayerHits = 0
+            pendingMeleeHits = 0
+            pendingRangedHits = 0
+            defeatedBalEntityIds.clear()
+            cachedBalId = null
+            findBalEntity()
             update()
             updateBossBar()
             ChatUtils.debug("BalBossTracker: Bal HP reset to 200 from spawn chat message")
@@ -748,9 +822,13 @@ object BalBossTracker {
 
     fun resetBossHp(hp: Int = BAL_MAX_HP) {
         balCurrentHp = hp.coerceIn(0, BAL_MAX_HP)
+        if (hp == BAL_MAX_HP) {
+            defeatedBalEntityIds.clear()
+            cachedBalId = null
+        }
         update()
         updateBossBar()
-        ChatUtils.chat("§a[SkyHanni] Set Bal health to §e$balCurrentHp§7/§e$BAL_MAX_HP§a.")
+        runCatching { ChatUtils.chat("§a[SkyHanni] Set Bal health to §e$balCurrentHp§7/§e$BAL_MAX_HP§a.") }
     }
 
     fun resetAllStats() {
@@ -763,13 +841,18 @@ object BalBossTracker {
         totalHits = 0L
         totalBosses = 0
         currentBossHits = 0
+        pendingMeleeHits = 0
+        pendingRangedHits = 0
+        defeatedBalEntityIds.clear()
+        cachedBalId = null
         balCurrentHp = BAL_MAX_HP
         update()
         updateBossBar()
-        ChatUtils.chat("§a[SkyHanni] Reset all Bal Boss Tracker statistics!")
+        runCatching { ChatUtils.chat("§a[SkyHanni] Reset all Bal Boss Tracker statistics!") }
     }
 
     private fun updateBossBar() {
+        if (runCatching { Minecraft.getInstance().font }.getOrNull() == null) return
         val hp = balCurrentHp.coerceIn(0, BAL_MAX_HP)
         val percent = hp.toDouble() / BAL_MAX_HP
         val colorCode = when {
@@ -804,6 +887,7 @@ object BalBossTracker {
     }
 
     private fun update() {
+        if (runCatching { Minecraft.getInstance().font }.getOrNull() == null) return
         val mf = SkyblockStat.MAGIC_FIND.lastKnownValue ?: 0.0
         val pl = SkyblockStat.PET_LUCK.lastKnownValue ?: 0.0
         val statMultiplier = 1.0 + (mf + pl) / 100.0

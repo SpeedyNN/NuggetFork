@@ -69,5 +69,32 @@ class BalBossTrackerTest {
         val legAtMean = BalBossTracker.calculateProbability(18519, pLeg)
         assertTrue(legAtMean > 0.63 && legAtMean < 0.64)
     }
+
+    @Test
+    fun `test boss health bar bounds and resets`() {
+        assertEquals(200, BalBossTracker.BAL_MAX_HP)
+
+        // Test custom HP clamp
+        BalBossTracker.resetBossHp(250)
+        assertEquals(200, BalBossTracker.balCurrentHp)
+
+        BalBossTracker.resetBossHp(-10)
+        assertEquals(0, BalBossTracker.balCurrentHp)
+
+        BalBossTracker.resetBossHp(100)
+        assertEquals(100, BalBossTracker.balCurrentHp)
+
+        // Reset to full
+        BalBossTracker.resetBossHp(BalBossTracker.BAL_MAX_HP)
+        assertEquals(200, BalBossTracker.balCurrentHp)
+
+        // Test defeat state: 0 HP
+        BalBossTracker.resetBossHp(0)
+        assertEquals(0, BalBossTracker.balCurrentHp)
+
+        // Reset all stats should restore full 200 HP
+        BalBossTracker.resetAllStats()
+        assertEquals(200, BalBossTracker.balCurrentHp)
+    }
 }
 
