@@ -47,6 +47,23 @@ object SackGoalTracker {
     private var display = listOf<Renderable>()
     private var dummyDisplay = listOf<Renderable>()
 
+    // Optimization state caches
+    private var lastTrackedItem: String = ""
+    private var lastCurrent: Long = -1L
+    private var lastTarget: Long = -1L
+    private var lastBarWidth: Int = -1
+    private var lastBarHeight: Int = -1
+    private var cachedItemStack: SafeItemStack = SafeItemStack.EMPTY
+
+    private var dummyBarWidth: Int = -1
+    private var dummyBarHeight: Int = -1
+
+    private var cachedSackSuggestions: List<String> = emptyList()
+    private var lastSackListSize: Int = -1
+
+    private var cachedAllSackItems: Set<NeuInternalName> = emptySet()
+    private var lastSacksSize: Int = -1
+
     sealed class GoalCommandResult {
         data class SetGoal(val internalName: NeuInternalName, val amount: Long) : GoalCommandResult()
         object ClearGoal : GoalCommandResult()
@@ -128,13 +145,41 @@ object SackGoalTracker {
         "compacted wild rose" to FarmingProfitTrackerCrops.COMPACTED_WILD_ROSE,
     )
 
+    private fun getSackSuggestions(): List<String> {
+        val currentSize = SackApi.sackListInternalNames.size
+        if (cachedSackSuggestions.isEmpty() || currentSize != lastSackListSize) {
+            lastSackListSize = currentSize
+            cachedSackSuggestions = (KNOWN_CROP_ALIASES.keys + SackApi.sackListInternalNames.map { it.lowercase().replace(" ", "_") }).distinct().sorted()
+        }
+        return cachedSackSuggestions
+    }
+
+    private fun getAllSackItems(): Set<NeuInternalName> {
+        val size = SackApi.sacks.size
+        if (cachedAllSackItems.isEmpty() || size != lastSacksSize) {
+            lastSacksSize = size
+            cachedAllSackItems = SackApi.sacks.values.flatten().toSet()
+        }
+        return cachedAllSackItems
+    }
+
     private val sackSuggestions = SuggestionProvider<FabricClientCommandSource> { _, builder ->
         val remaining = builder.remainingLowerCase
-        val candidates = (KNOWN_CROP_ALIASES.keys + SackApi.sackListInternalNames.map { it.lowercase() }).distinct()
-        for (item in candidates) {
-            val key = item.replace(" ", "_")
-            if (key.startsWith(remaining) || key.contains(remaining)) {
+        val candidates = getSackSuggestions()
+        if (remaining.isEmpty()) {
+            for (key in candidates) {
                 builder.suggest(key)
+            }
+        } else {
+            for (item in candidates) {
+                if (item.startsWith(remaining)) {
+                    builder.suggest(item)
+                }
+            }
+            for (item in candidates) {
+                if (!item.startsWith(remaining) && item.contains(remaining)) {
+                    builder.suggest(item)
+                }
             }
         }
         builder.buildFuture()
@@ -164,6 +209,7 @@ object SackGoalTracker {
         config.trackedItemInternalName = internalName.asString()
         config.targetGoalAmount = amount
         completedSoundPlayed = false
+        invalidateDisplayCache()
         update()
     }
 
@@ -171,7 +217,17 @@ object SackGoalTracker {
         config.trackedItemInternalName = ""
         config.targetGoalAmount = 0L
         completedSoundPlayed = false
+        invalidateDisplayCache()
         update()
+    }
+
+    private fun invalidateDisplayCache() {
+        lastTrackedItem = ""
+        lastCurrent = -1L
+        lastTarget = -1L
+        lastBarWidth = -1
+        lastBarHeight = -1
+        cachedItemStack = SafeItemStack.EMPTY
     }
 
     fun resolveTrackedItem(query: String): NeuInternalName? {
@@ -185,7 +241,7 @@ object SackGoalTracker {
 
         val upper = trimmed.uppercase()
         val upperUnderscore = trimmed.replace(" ", "_").uppercase()
-        val allSackItems = SackApi.sacks.values.flatten().toSet()
+        val allSackItems = getAllSackItems()
 
         // Exact internal name match in sacks or sack list
         allSackItems.firstOrNull { it.asString().equals(upper, ignoreCase = true) || it.asString().equals(upperUnderscore, ignoreCase = true) }?.let { return it }
@@ -315,7 +371,7 @@ object SackGoalTracker {
         }
     }
 
-    private fun buildDisplay(internalName: NeuInternalName, current: Long, target: Long): List<Renderable> {
+    private fun buildDisplay(internalName: NeuInternalName, itemStack: SafeItemStack, current: Long, target: Long): List<Renderable> {
         val progress = (current.toDouble() / target.coerceAtLeast(1L)).coerceAtLeast(0.0)
         val percentage = progress * 100.0
         val percentStr = "%.1f%%".format(percentage)
@@ -323,7 +379,6 @@ object SackGoalTracker {
 
         val list = mutableListOf<Renderable>()
 
-        val itemStack = runCatching { internalName.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
         val titleText = "§e${internalName.repoItemName} §7Goal"
         val header = if (!itemStack.isEmpty) {
             Renderable.horizontal(
@@ -357,7 +412,20 @@ object SackGoalTracker {
         if (internalNameStr.isNotEmpty() && target > 0L) {
             val internalName = internalNameStr.toInternalName()
             val current = SackApi.run { internalName.getAmountInSacks().toLong() }
-            display = buildDisplay(internalName, current, target)
+
+            if (internalNameStr != lastTrackedItem) {
+                cachedItemStack = runCatching { internalName.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
+            }
+
+            if (internalNameStr != lastTrackedItem || current != lastCurrent || target != lastTarget ||
+                config.barWidth != lastBarWidth || config.barHeight != lastBarHeight) {
+                lastTrackedItem = internalNameStr
+                lastCurrent = current
+                lastTarget = target
+                lastBarWidth = config.barWidth
+                lastBarHeight = config.barHeight
+                display = buildDisplay(internalName, cachedItemStack, current, target)
+            }
 
             if (current >= target) {
                 if (!completedSoundPlayed) {
@@ -371,15 +439,26 @@ object SackGoalTracker {
                 completedSoundPlayed = false
             }
         } else {
-            display = emptyList()
+            if (display.isNotEmpty()) {
+                display = emptyList()
+            }
+            lastTrackedItem = ""
+            lastCurrent = -1L
             completedSoundPlayed = false
         }
 
-        dummyDisplay = buildDisplay(
-            "ENCHANTED_MELON".toInternalName(),
-            75_000L,
-            150_000L,
-        )
+        if (dummyDisplay.isEmpty() || config.barWidth != dummyBarWidth || config.barHeight != dummyBarHeight) {
+            dummyBarWidth = config.barWidth
+            dummyBarHeight = config.barHeight
+            val dummyItem = "ENCHANTED_MELON".toInternalName()
+            val dummyStack = runCatching { dummyItem.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
+            dummyDisplay = buildDisplay(
+                dummyItem,
+                dummyStack,
+                75_000L,
+                150_000L,
+            )
+        }
     }
 
     @HandleEvent

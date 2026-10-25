@@ -47,6 +47,17 @@ object CollectionGoalTracker {
     private var display = listOf<Renderable>()
     private var dummyDisplay = listOf<Renderable>()
 
+    // Optimization state caches
+    private var lastTrackedKey: String = ""
+    private var lastCurrent: Long = -1L
+    private var lastTarget: Long = -1L
+    private var lastBarWidth: Int = -1
+    private var lastBarHeight: Int = -1
+    private var cachedItemStack: SafeItemStack = SafeItemStack.EMPTY
+
+    private var dummyBarWidth: Int = -1
+    private var dummyBarHeight: Int = -1
+
     data class CollectionEntry(
         val key: String,
         val displayName: String,
@@ -150,13 +161,39 @@ object CollectionGoalTracker {
         CollectionEntry("necron", "Necron", "NECRON_HANDLE".toInternalName()),
     )
 
-    private val collectionSuggestions = ALL_COLLECTIONS.map { it.key }
+    // Pre-indexed lookup maps for O(1) matching
+    private val byKey: Map<String, CollectionEntry> = ALL_COLLECTIONS.associateBy { it.key }
+    private val byAlias: Map<String, CollectionEntry> = buildMap {
+        for (entry in ALL_COLLECTIONS) {
+            put(entry.key, entry)
+            put(entry.displayName.lowercase(), entry)
+            put(entry.displayName.lowercase().replace(" ", "_"), entry)
+            for (alias in entry.aliases) {
+                put(alias.lowercase(), entry)
+                put(alias.lowercase().replace(" ", "_"), entry)
+            }
+        }
+    }
+    private val byInternalName: Map<String, CollectionEntry> = ALL_COLLECTIONS.associateBy { it.internalName.asString() }
+
+    private val collectionSuggestions = ALL_COLLECTIONS.map { it.key }.sorted()
 
     val collectionSuggestionProvider = SuggestionProvider<FabricClientCommandSource> { _, builder ->
         val remaining = builder.remainingLowerCase
-        for (key in collectionSuggestions) {
-            if (key.startsWith(remaining) || key.contains(remaining)) {
+        if (remaining.isEmpty()) {
+            for (key in collectionSuggestions) {
                 builder.suggest(key)
+            }
+        } else {
+            for (key in collectionSuggestions) {
+                if (key.startsWith(remaining)) {
+                    builder.suggest(key)
+                }
+            }
+            for (key in collectionSuggestions) {
+                if (!key.startsWith(remaining) && key.contains(remaining)) {
+                    builder.suggest(key)
+                }
             }
         }
         builder.buildFuture()
@@ -176,8 +213,7 @@ object CollectionGoalTracker {
 
     fun hasActiveGoal(): Boolean = config.trackedCollectionKey.isNotEmpty() && config.targetGoalAmount > 0L
 
-    fun getActiveCollectionEntry(): CollectionEntry? =
-        ALL_COLLECTIONS.firstOrNull { it.key == config.trackedCollectionKey }
+    fun getActiveCollectionEntry(): CollectionEntry? = byKey[config.trackedCollectionKey]
 
     fun getCurrentAmount(): Long {
         val entry = getActiveCollectionEntry() ?: return 0L
@@ -209,6 +245,7 @@ object CollectionGoalTracker {
         config.trackedCollectionKey = entry.key
         config.targetGoalAmount = amount
         completedSoundPlayed = false
+        invalidateDisplayCache()
         update()
     }
 
@@ -216,30 +253,34 @@ object CollectionGoalTracker {
         config.trackedCollectionKey = ""
         config.targetGoalAmount = 0L
         completedSoundPlayed = false
+        invalidateDisplayCache()
         update()
+    }
+
+    private fun invalidateDisplayCache() {
+        lastTrackedKey = ""
+        lastCurrent = -1L
+        lastTarget = -1L
+        lastBarWidth = -1
+        lastBarHeight = -1
+        cachedItemStack = SafeItemStack.EMPTY
     }
 
     fun resolveCollection(query: String): CollectionEntry? {
         val clean = query.trim().lowercase().replace(" ", "_").replace("-", "_")
         if (clean.isEmpty()) return null
 
-        // 1. Exact key match
-        ALL_COLLECTIONS.firstOrNull { it.key == clean }?.let { return it }
+        // 1. O(1) match by exact key, name, or alias
+        byAlias[clean]?.let { return it }
 
-        // 2. Exact display name match
-        ALL_COLLECTIONS.firstOrNull { it.displayName.equals(query.trim(), ignoreCase = true) }?.let { return it }
-
-        // 3. Alias match
-        ALL_COLLECTIONS.firstOrNull { clean in it.aliases }?.let { return it }
-
-        // 4. Exact internal name match
+        // 2. O(1) match by internal name
         val upper = query.trim().uppercase().replace(" ", "_")
-        ALL_COLLECTIONS.firstOrNull { it.internalName.asString() == upper }?.let { return it }
+        byInternalName[upper]?.let { return it }
 
-        // 5. Starts with match
+        // 3. Fallback prefix search
         ALL_COLLECTIONS.firstOrNull { it.key.startsWith(clean) || it.displayName.lowercase().startsWith(clean) }?.let { return it }
 
-        // 6. Contains match
+        // 4. Fallback contains search
         ALL_COLLECTIONS.firstOrNull { it.key.contains(clean) || it.displayName.lowercase().contains(clean) }?.let { return it }
 
         return null
@@ -259,7 +300,7 @@ object CollectionGoalTracker {
             if (amount != null && amount > 0L) {
                 if (heldItem != null) {
                     val baseInternalName = NeuItems.getPrimitiveMultiplier(heldItem).internalName
-                    val resolved = ALL_COLLECTIONS.firstOrNull { it.internalName == heldItem || it.internalName == baseInternalName }
+                    val resolved = byInternalName[heldItem.asString()] ?: byInternalName[baseInternalName.asString()]
                     if (resolved != null) {
                         return GoalCommandResult.SetGoal(resolved, amount)
                     }
@@ -351,7 +392,7 @@ object CollectionGoalTracker {
         }
     }
 
-    private fun buildDisplay(entry: CollectionEntry, current: Long, target: Long): List<Renderable> {
+    private fun buildDisplay(entry: CollectionEntry, itemStack: SafeItemStack, current: Long, target: Long): List<Renderable> {
         val progress = (current.toDouble() / target.coerceAtLeast(1L)).coerceAtLeast(0.0)
         val percentage = progress * 100.0
         val percentStr = "%.1f%%".format(percentage)
@@ -359,7 +400,6 @@ object CollectionGoalTracker {
 
         val list = mutableListOf<Renderable>()
 
-        val itemStack = runCatching { entry.internalName.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
         val titleText = "§e${entry.displayName} §7Collection"
 
         val header = if (!itemStack.isEmpty) {
@@ -393,7 +433,20 @@ object CollectionGoalTracker {
 
         if (entry != null && target > 0L) {
             val current = getCollectionAmount(entry)
-            display = buildDisplay(entry, current, target)
+
+            if (entry.key != lastTrackedKey) {
+                cachedItemStack = runCatching { entry.internalName.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
+            }
+
+            if (entry.key != lastTrackedKey || current != lastCurrent || target != lastTarget ||
+                config.barWidth != lastBarWidth || config.barHeight != lastBarHeight) {
+                lastTrackedKey = entry.key
+                lastCurrent = current
+                lastTarget = target
+                lastBarWidth = config.barWidth
+                lastBarHeight = config.barHeight
+                display = buildDisplay(entry, cachedItemStack, current, target)
+            }
 
             if (current >= target) {
                 if (!completedSoundPlayed) {
@@ -407,15 +460,26 @@ object CollectionGoalTracker {
                 completedSoundPlayed = false
             }
         } else {
-            display = emptyList()
+            if (display.isNotEmpty()) {
+                display = emptyList()
+            }
+            lastTrackedKey = ""
+            lastCurrent = -1L
             completedSoundPlayed = false
         }
 
-        dummyDisplay = buildDisplay(
-            ALL_COLLECTIONS.first { it.key == "wheat" },
-            50_000L,
-            100_000L,
-        )
+        if (dummyDisplay.isEmpty() || config.barWidth != dummyBarWidth || config.barHeight != dummyBarHeight) {
+            dummyBarWidth = config.barWidth
+            dummyBarHeight = config.barHeight
+            val dummyEntry = ALL_COLLECTIONS.first { it.key == "wheat" }
+            val dummyStack = runCatching { dummyEntry.internalName.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
+            dummyDisplay = buildDisplay(
+                dummyEntry,
+                dummyStack,
+                50_000L,
+                100_000L,
+            )
+        }
     }
 
     @HandleEvent
@@ -476,4 +540,3 @@ object CollectionGoalTracker {
         }
     }
 }
-
