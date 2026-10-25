@@ -4,6 +4,7 @@ import at.hannibal2.skyhanni.features.garden.tracker.FarmingProfitTrackerCrops
 import at.hannibal2.skyhanni.features.inventory.sacks.SackGoalTracker
 import at.hannibal2.skyhanni.features.inventory.sacks.SackGoalTracker.GoalCommandResult
 import at.hannibal2.skyhanni.utils.NeuInternalName.Companion.toInternalName
+import at.hannibal2.skyhanni.utils.RenderUtils.HorizontalAlignment
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -84,6 +85,6 @@ class SackGoalTrackerTest {
         val bar = SackGoalTracker.createProgressBar(0.65, 140, 8)
         assertEquals(140, bar.width)
         assertEquals(8, bar.height)
+        assertEquals(HorizontalAlignment.CENTER, bar.horizontalAlign)
     }
 }
-

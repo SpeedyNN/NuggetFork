@@ -4,6 +4,7 @@ import at.hannibal2.skyhanni.SkyHanniMod
 import at.hannibal2.skyhanni.api.event.HandleEvent
 import at.hannibal2.skyhanni.config.commands.CommandCategory
 import at.hannibal2.skyhanni.config.commands.CommandRegistrationEvent
+import at.hannibal2.skyhanni.config.commands.brigadier.BrigadierArguments
 import at.hannibal2.skyhanni.data.GuiEditManager
 import at.hannibal2.skyhanni.data.SackApi
 import at.hannibal2.skyhanni.events.SackChangeEvent
@@ -34,6 +35,8 @@ import at.hannibal2.skyhanni.utils.renderables.Renderable
 import at.hannibal2.skyhanni.utils.renderables.container.HorizontalContainerRenderable.Companion.horizontal
 import at.hannibal2.skyhanni.utils.renderables.primitives.ItemStackRenderable.Companion.item
 import at.hannibal2.skyhanni.utils.renderables.primitives.text
+import com.mojang.brigadier.suggestion.SuggestionProvider
+import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 
 @SkyHanniModule
 object SackGoalTracker {
@@ -125,6 +128,18 @@ object SackGoalTracker {
         "compacted wild rose" to FarmingProfitTrackerCrops.COMPACTED_WILD_ROSE,
     )
 
+    private val sackSuggestions = SuggestionProvider<FabricClientCommandSource> { _, builder ->
+        val remaining = builder.remainingLowerCase
+        val candidates = (KNOWN_CROP_ALIASES.keys + SackApi.sackListInternalNames.map { it.lowercase() }).distinct()
+        for (item in candidates) {
+            val key = item.replace(" ", "_")
+            if (key.startsWith(remaining) || key.contains(remaining)) {
+                builder.suggest(key)
+            }
+        }
+        builder.buildFuture()
+    }
+
     init {
         RenderDisplayHelper(
             outsideInventory = true,
@@ -165,6 +180,8 @@ object SackGoalTracker {
 
         val lower = trimmed.lowercase()
         KNOWN_CROP_ALIASES[lower]?.let { return it }
+        val lowerUnderscore = lower.replace(" ", "_")
+        KNOWN_CROP_ALIASES[lowerUnderscore]?.let { return it }
 
         val upper = trimmed.uppercase()
         val upperUnderscore = trimmed.replace(" ", "_").uppercase()
@@ -280,7 +297,7 @@ object SackGoalTracker {
     fun createProgressBar(progress: Double, width: Int, height: Int): Renderable = object : Renderable {
         override val width = width
         override val height = height
-        override val horizontalAlign = RenderUtils.HorizontalAlignment.LEFT
+        override val horizontalAlign = RenderUtils.HorizontalAlignment.CENTER
         override val verticalAlign = RenderUtils.VerticalAlignment.TOP
 
         override fun render(mouseOffsetX: Int, mouseOffsetY: Int) {
@@ -311,11 +328,13 @@ object SackGoalTracker {
         val header = if (!itemStack.isEmpty) {
             Renderable.horizontal(
                 Renderable.item({ itemStack }),
-                Renderable.text(titleText),
-                spacing = 3,
+                Renderable.text(titleText, horizontalAlign = RenderUtils.HorizontalAlignment.CENTER),
+                spacing = 2,
+                horizontalAlign = RenderUtils.HorizontalAlignment.CENTER,
+                verticalAlign = RenderUtils.VerticalAlignment.CENTER,
             )
         } else {
-            Renderable.text(titleText)
+            Renderable.text(titleText, horizontalAlign = RenderUtils.HorizontalAlignment.CENTER)
         }
         list.add(header)
 
@@ -326,7 +345,7 @@ object SackGoalTracker {
         } else {
             "§a${current.addSeparators()} §7/ §e${target.addSeparators()} §b($percentStr)"
         }
-        list.add(Renderable.text(countText))
+        list.add(Renderable.text(countText, horizontalAlign = RenderUtils.HorizontalAlignment.CENTER))
 
         return list
     }
@@ -385,16 +404,39 @@ object SackGoalTracker {
         event.registerBrigadier("setsackgoal") {
             description = "Set a target sack collection goal to track with a progress bar GUI"
             category = CommandCategory.USERS_ACTIVE
-            aliases = listOf("setcollectiongoal", "sackgoal", "collectiongoal")
-            legacyCallbackArgs { handleGoalCommand(it) }
+            aliases = listOf("sackgoal")
+            simpleCallback {
+                handleGoalCommand(emptyArray())
+            }
+            arg("item", BrigadierArguments.string(), sackSuggestions) { itemArg ->
+                arg("amount", BrigadierArguments.string()) { amountArg ->
+                    callback {
+                        handleGoalCommand(arrayOf(getArg(itemArg), getArg(amountArg)))
+                    }
+                }
+                arg("part2", BrigadierArguments.string()) { part2Arg ->
+                    arg("amount", BrigadierArguments.string()) { amountArg ->
+                        callback {
+                            handleGoalCommand(arrayOf("${getArg(itemArg)} ${getArg(part2Arg)}", getArg(amountArg)))
+                        }
+                    }
+                }
+                callback {
+                    val item = getArg(itemArg)
+                    if (item.equals("clear", ignoreCase = true) || item.equals("reset", ignoreCase = true)) {
+                        handleClearCommand()
+                    } else {
+                        handleGoalCommand(arrayOf(item))
+                    }
+                }
+            }
         }
 
         event.registerBrigadier("clearsackgoal") {
             description = "Clear your current sack collection goal"
             category = CommandCategory.USERS_ACTIVE
-            aliases = listOf("clearcollectiongoal", "resetsackgoal")
+            aliases = listOf("resetsackgoal")
             legacyCallbackArgs { handleClearCommand() }
         }
     }
 }
-

@@ -9,6 +9,7 @@ import at.hannibal2.skyhanni.config.features.inventory.helper.HelperConfig
 import at.hannibal2.skyhanni.config.features.inventory.npctrade.NpcTradeConfig
 import at.hannibal2.skyhanni.config.features.inventory.sacks.OutsideSackValueConfig
 import at.hannibal2.skyhanni.config.features.inventory.sacks.SackGoalConfig
+import at.hannibal2.skyhanni.config.features.inventory.collections.CollectionGoalConfig
 import at.hannibal2.skyhanni.config.features.itemability.ItemAbilityConfig
 import at.hannibal2.skyhanni.config.features.misc.EstimatedItemValueConfig
 import at.hannibal2.skyhanni.config.features.misc.PocketSackInASackConfig
@@ -129,6 +130,11 @@ class InventoryConfig {
     @ConfigOption(name = "Sack Goal Tracker", desc = "")
     @Accordion
     val sackGoal: SackGoalConfig = SackGoalConfig()
+
+    @Expose
+    @ConfigOption(name = "Collection Goal Tracker", desc = "")
+    @Accordion
+    val collectionGoal: CollectionGoalConfig = CollectionGoalConfig()
 
     @Expose
     @ConfigOption(
