@@ -25,6 +25,10 @@ class About {
     @Transient
     var currentVersion: Unit? = null
 
+    @ConfigOption(name = "NuggetFork Version", desc = "NuggetFork build " + at.hannibal2.skyhanni.SkyHanniMod.NUGGET_FORK_VERSION)
+    @ConfigEditorButton(buttonText = "Releases")
+    val nuggetForkReleases: Runnable = Runnable { openBrowser("https://github.com/SpeedyNN/NuggetFork/releases") }
+
     @ConfigOption(name = "Update Stream", desc = "How frequently you want updates for SkyHanni")
     @Expose
     @ConfigEditorDropdown

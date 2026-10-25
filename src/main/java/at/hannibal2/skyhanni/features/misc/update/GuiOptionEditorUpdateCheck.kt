@@ -54,7 +54,18 @@ class GuiOptionEditorUpdateCheck(option: ProcessedOption) : GuiOptionEditor(opti
             versionText.asStructuredText(),
             fr,
             widthRemaining / 4F,
-            10F,
+            6F,
+            true,
+            widthRemaining / 2,
+            -1,
+        )
+
+        val nuggetForkText = "\u00A76NuggetFork \u00A7e${SkyHanniMod.NUGGET_FORK_VERSION}"
+        context.drawStringCenteredScaledMaxWidth(
+            nuggetForkText.asStructuredText(),
+            fr,
+            widthRemaining / 4F,
+            16F,
             true,
             widthRemaining / 2,
             -1,
