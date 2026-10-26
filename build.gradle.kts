@@ -356,7 +356,7 @@ tasks.withType<JavaCompile> {
 
 tasks.withType<GradleJar> {
     archiveBaseName.set("SkyHanni")
-    archiveVersion.set("$version-mc${target.minecraftVersion.versionName}-NuggetFork-v1.2.0")
+    archiveVersion.set("$version-mc${target.minecraftVersion.versionName}-NuggetFork-v1.2.1")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE // Why do we have this here? This only *hides* errors.
 }
 
