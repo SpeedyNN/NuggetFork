@@ -13,6 +13,7 @@ import at.hannibal2.skyhanni.utils.InventoryDetector
 import at.hannibal2.skyhanni.utils.ItemUtils.cleanName
 import at.hannibal2.skyhanni.utils.ItemUtils.getInternalName
 import at.hannibal2.skyhanni.utils.ItemUtils.getLoreComponent
+import at.hannibal2.skyhanni.utils.ItemUtils.itemNameWithoutColor
 import at.hannibal2.skyhanni.utils.NeuInternalName
 import at.hannibal2.skyhanni.utils.NeuInternalName.Companion.toInternalName
 import at.hannibal2.skyhanni.utils.NeuItems
@@ -85,6 +86,7 @@ object CollectionApi {
 
     val collectionInventory = InventoryDetector { collectionInventoryPattern }
     val collectionValue = mutableMapOf<NeuInternalName, Long>()
+    val collectionByName = mutableMapOf<String, Long>()
 
     // TODO repo
     private val incorrectCollectionNames = mapOf(
@@ -94,6 +96,27 @@ object CollectionApi {
     @HandleEvent
     fun onProfileJoin(event: ProfileJoinEvent) {
         collectionValue.clear()
+        collectionByName.clear()
+    }
+
+    fun saveCollection(internalName: NeuInternalName, displayName: String, counter: Long) {
+        val raw = internalName.asString().uppercase()
+        if (internalName != NeuInternalName.NONE && raw.isNotEmpty()) {
+            collectionValue[internalName] = counter
+            val withDash = raw.replace(':', '-').toInternalName()
+            collectionValue[withDash] = counter
+            val withColon = raw.replace('-', ':').toInternalName()
+            collectionValue[withColon] = counter
+        }
+
+        val cleanName = displayName.trim().lowercase().removeSuffix(" collection").trim()
+        if (cleanName.isNotEmpty()) {
+            collectionByName[cleanName] = counter
+            collectionByName[cleanName.replace(" ", "_")] = counter
+            collectionByName[cleanName.replace("_", " ")] = counter
+            val upperName = cleanName.uppercase().replace(" ", "_").toInternalName()
+            collectionValue[upperName] = counter
+        }
     }
 
     @HandleEvent
@@ -108,7 +131,8 @@ object CollectionApi {
             singleCounterPattern.firstMatcher(lore.map { it.string }) {
                 val counter = group("amount").formatLong()
                 val internalName = stack.getInternalName().getCorrectedName()
-                collectionValue[internalName] = counter
+                val menuName = inventoryName.removeSuffix(" Collection").trim()
+                saveCollection(internalName, menuName, counter)
             }
 
             CollectionUpdateEvent.post()
@@ -128,9 +152,16 @@ object CollectionApi {
                 val isNotMaxed = collectionNotMaxedPattern.anyMatches(lore.map { it.string })
 
                 if (!isCoop || isNotMaxed) {
-                    counterPattern.firstMatcher(lore.map { it.string }) {
+                    val found = singleCounterPattern.firstMatcher(lore.map { it.string }) {
                         val counter = group("amount").formatLong()
-                        collectionValue[internalName] = counter
+                        saveCollection(internalName, name, counter)
+                        true
+                    } ?: false
+                    if (!found) {
+                        counterPattern.firstMatcher(lore.map { it.string }) {
+                            val counter = group("amount").formatLong()
+                            saveCollection(internalName, name, counter)
+                        }
                     }
                 } else {
                     val coopIndex = lore.indexOfFirst { it.string == "Co-op Contributions:" }
@@ -145,7 +176,7 @@ object CollectionApi {
                         }
                     }
 
-                    collectionValue[internalName] = totalCollected
+                    saveCollection(internalName, name, totalCollected)
                 }
             }
             CollectionUpdateEvent.post()
@@ -164,10 +195,33 @@ object CollectionApi {
             ChatUtils.debug("CollectionAPI.addFromInventory: item is null for '$internalName'")
             return
         }
-        collectionValue.addOrPut(internalName, event.amount.toLong())
+        val current = getCollectionCounter(internalName) ?: 0L
+        saveCollection(internalName, internalName.itemNameWithoutColor, current + event.amount.toLong())
+        CollectionUpdateEvent.post()
     }
 
     fun isCollectionTier0(lore: List<String>) = lore.any { collectionTier0Pattern.matches(it) }
     fun NeuInternalName.getCorrectedName() = incorrectCollectionNames.getOrElse(this) { this }
-    fun getCollectionCounter(internalName: NeuInternalName): Long? = collectionValue[internalName]
+
+    fun getCollectionCounter(internalName: NeuInternalName): Long? {
+        collectionValue[internalName]?.let { return it }
+        val raw = internalName.asString().uppercase()
+        val withDash = raw.replace(':', '-').toInternalName()
+        collectionValue[withDash]?.let { return it }
+        val withColon = raw.replace('-', ':').toInternalName()
+        collectionValue[withColon]?.let { return it }
+        val nameKey = raw.lowercase().replace("_", " ")
+        collectionByName[nameKey]?.let { return it }
+        collectionByName[raw.lowercase()]?.let { return it }
+        return null
+    }
+
+    fun getCollectionCounterByName(name: String): Long? {
+        val clean = name.trim().lowercase().removeSuffix(" collection").trim()
+        collectionByName[clean]?.let { return it }
+        collectionByName[clean.replace(" ", "_")]?.let { return it }
+        collectionByName[clean.replace("_", " ")]?.let { return it }
+        val upperInternal = clean.uppercase().replace(" ", "_").toInternalName()
+        return getCollectionCounter(upperInternal)
+    }
 }

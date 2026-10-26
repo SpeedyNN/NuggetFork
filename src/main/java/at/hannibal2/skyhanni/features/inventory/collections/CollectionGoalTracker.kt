@@ -75,22 +75,25 @@ object CollectionGoalTracker {
 
     val ALL_COLLECTIONS: List<CollectionEntry> = listOf(
         // Farming - Crops
-        CollectionEntry("wheat", "Wheat", "WHEAT".toInternalName(), CropType.WHEAT),
-        CollectionEntry("carrot", "Carrot", "CARROT_ITEM".toInternalName(), CropType.CARROT),
-        CollectionEntry("potato", "Potato", "POTATO_ITEM".toInternalName(), CropType.POTATO),
+        CollectionEntry("wheat", "Wheat", "WHEAT".toInternalName(), CropType.WHEAT, listOf("hay_block")),
+        CollectionEntry("carrot", "Carrot", "CARROT_ITEM".toInternalName(), CropType.CARROT, listOf("carrot_item")),
+        CollectionEntry("potato", "Potato", "POTATO_ITEM".toInternalName(), CropType.POTATO, listOf("potato_item")),
         CollectionEntry("pumpkin", "Pumpkin", "PUMPKIN".toInternalName(), CropType.PUMPKIN),
         CollectionEntry("melon", "Melon", "MELON".toInternalName(), CropType.MELON, listOf("melon_slice")),
         CollectionEntry("seeds", "Seeds", "SEEDS".toInternalName(), null, listOf("wheat_seeds")),
-        CollectionEntry("red_mushroom", "Red Mushroom", "RED_MUSHROOM".toInternalName(), CropType.MUSHROOM, listOf("mushroom")),
-        CollectionEntry("brown_mushroom", "Brown Mushroom", "BROWN_MUSHROOM".toInternalName(), CropType.MUSHROOM),
-        CollectionEntry("cocoa_beans", "Cocoa Beans", "INK_SACK:3".toInternalName(), CropType.COCOA_BEANS, listOf("cocoa")),
+        CollectionEntry("red_mushroom", "Mushroom", "RED_MUSHROOM".toInternalName(), CropType.MUSHROOM, listOf("mushroom", "mushrooms", "brown_mushroom", "mushroom_collection", "red_mushroom")),
+        CollectionEntry("brown_mushroom", "Brown Mushroom", "BROWN_MUSHROOM".toInternalName(), CropType.MUSHROOM, listOf("brown_mushrooms")),
+        CollectionEntry("cocoa_beans", "Cocoa Beans", "INK_SACK-3".toInternalName(), CropType.COCOA_BEANS, listOf("cocoa", "cocoa_bean", "ink_sack:3", "ink_sack-3")),
         CollectionEntry("cactus", "Cactus", "CACTUS".toInternalName(), CropType.CACTUS),
         CollectionEntry("sugar_cane", "Sugar Cane", "SUGAR_CANE".toInternalName(), CropType.SUGAR_CANE, listOf("cane")),
-        CollectionEntry("nether_wart", "Nether Wart", "NETHER_STALK".toInternalName(), CropType.NETHER_WART, listOf("wart")),
+        CollectionEntry("nether_wart", "Nether Wart", "NETHER_STALK".toInternalName(), CropType.NETHER_WART, listOf("wart", "nether_stalk")),
+        CollectionEntry("moonflower", "Moonflower", "MOONFLOWER".toInternalName()),
+        CollectionEntry("sunflower", "Sunflower", "DOUBLE_PLANT".toInternalName(), aliases = listOf("double_plant")),
+        CollectionEntry("wild_rose", "Wild Rose", "WILD_ROSE".toInternalName()),
 
         // Farming - Animal Drops
         CollectionEntry("leather", "Leather", "LEATHER".toInternalName(), null, listOf("cow", "raw_beef", "beef")),
-        CollectionEntry("raw_beef", "Raw Beef", "RAW_BEEF".toInternalName(), null, listOf("beef")),
+        CollectionEntry("raw_beef", "Raw Beef", "RAW_BEEF".toInternalName(), null, listOf("beef", "steak")),
         CollectionEntry("porkchop", "Raw Porkchop", "PORK".toInternalName(), null, listOf("pork", "raw_porkchop", "pig")),
         CollectionEntry("chicken", "Raw Chicken", "RAW_CHICKEN".toInternalName(), null, listOf("raw_chicken")),
         CollectionEntry("feather", "Feather", "FEATHER".toInternalName(), null, listOf("feathers")),
@@ -99,14 +102,14 @@ object CollectionGoalTracker {
         CollectionEntry("rabbit_foot", "Rabbit's Foot", "RABBIT_FOOT".toInternalName(), null, listOf("rabbit_feet")),
 
         // Mining
-        CollectionEntry("cobblestone", "Cobblestone", "COBBLESTONE".toInternalName()),
+        CollectionEntry("cobblestone", "Cobblestone", "COBBLESTONE".toInternalName(), aliases = listOf("cobble")),
         CollectionEntry("coal", "Coal", "COAL".toInternalName()),
         CollectionEntry("iron_ingot", "Iron Ingot", "IRON_INGOT".toInternalName(), aliases = listOf("iron")),
         CollectionEntry("gold_ingot", "Gold Ingot", "GOLD_INGOT".toInternalName(), aliases = listOf("gold")),
-        CollectionEntry("diamond", "Diamond", "DIAMOND".toInternalName()),
-        CollectionEntry("lapis_lazuli", "Lapis Lazuli", "INK_SACK:4".toInternalName(), aliases = listOf("lapis")),
-        CollectionEntry("redstone", "Redstone", "REDSTONE".toInternalName()),
-        CollectionEntry("emerald", "Emerald", "EMERALD".toInternalName()),
+        CollectionEntry("diamond", "Diamond", "DIAMOND".toInternalName(), aliases = listOf("diamonds")),
+        CollectionEntry("lapis_lazuli", "Lapis Lazuli", "INK_SACK-4".toInternalName(), aliases = listOf("lapis", "ink_sack:4", "ink_sack-4", "lapis_ore")),
+        CollectionEntry("redstone", "Redstone", "REDSTONE".toInternalName(), aliases = listOf("redstone_dust")),
+        CollectionEntry("emerald", "Emerald", "EMERALD".toInternalName(), aliases = listOf("emeralds")),
         CollectionEntry("quartz", "Nether Quartz", "QUARTZ".toInternalName(), aliases = listOf("nether_quartz")),
         CollectionEntry("obsidian", "Obsidian", "OBSIDIAN".toInternalName()),
         CollectionEntry("glowstone_dust", "Glowstone Dust", "GLOWSTONE_DUST".toInternalName(), aliases = listOf("glowstone")),
@@ -114,55 +117,70 @@ object CollectionGoalTracker {
         CollectionEntry("ice", "Ice", "ICE".toInternalName()),
         CollectionEntry("netherrack", "Netherrack", "NETHERRACK".toInternalName()),
         CollectionEntry("sand", "Sand", "SAND".toInternalName()),
-        CollectionEntry("red_sand", "Red Sand", "SAND:1".toInternalName(), aliases = listOf("red_sand")),
-        CollectionEntry("mycelium", "Mycelium", "MYCEL".toInternalName(), aliases = listOf("mycelium")),
-        CollectionEntry("end_stone", "End Stone", "ENDER_STONE".toInternalName()),
-        CollectionEntry("mithril", "Mithril", "MITHRIL_ORE".toInternalName()),
+        CollectionEntry("red_sand", "Red Sand", "SAND-1".toInternalName(), aliases = listOf("sand:1", "sand-1")),
+        CollectionEntry("mycelium", "Mycelium", "MYCEL".toInternalName(), aliases = listOf("mycel")),
+        CollectionEntry("end_stone", "End Stone", "ENDER_STONE".toInternalName(), aliases = listOf("ender_stone")),
+        CollectionEntry("mithril", "Mithril", "MITHRIL_ORE".toInternalName(), aliases = listOf("mithril_ore")),
         CollectionEntry("hard_stone", "Hard Stone", "HARD_STONE".toInternalName()),
-        CollectionEntry("gemstone", "Gemstone", "ROUGH_AMBER_GEM".toInternalName(), aliases = listOf("rough_gemstone")),
-        CollectionEntry("titanium", "Titanium", "TITANIUM_ORE".toInternalName()),
+        CollectionEntry("gemstone", "Gemstone", "GEMSTONE_COLLECTION".toInternalName(), aliases = listOf("gemstones", "rough_amber_gem", "rough_gemstone")),
+        CollectionEntry("titanium", "Titanium", "TITANIUM_ORE".toInternalName(), aliases = listOf("titanium_ore")),
         CollectionEntry("glacite", "Glacite", "GLACITE".toInternalName()),
         CollectionEntry("tungsten", "Tungsten", "TUNGSTEN".toInternalName()),
         CollectionEntry("umber", "Umber", "UMBER".toInternalName()),
+        CollectionEntry("sulphur", "Sulphur", "SULPHUR_ORE".toInternalName(), aliases = listOf("sulphur_ore", "mining_sulphur")),
 
         // Combat
-        CollectionEntry("rotten_flesh", "Rotten Flesh", "ROTTEN_FLESH".toInternalName()),
-        CollectionEntry("bone", "Bone", "BONE".toInternalName()),
+        CollectionEntry("rotten_flesh", "Rotten Flesh", "ROTTEN_FLESH".toInternalName(), aliases = listOf("zombie")),
+        CollectionEntry("bone", "Bone", "BONE".toInternalName(), aliases = listOf("bones", "skeleton")),
         CollectionEntry("string", "String", "STRING".toInternalName()),
-        CollectionEntry("spider_eye", "Spider Eye", "SPIDER_EYE".toInternalName()),
-        CollectionEntry("gunpowder", "Gunpowder", "SULPHUR".toInternalName(), aliases = listOf("sulphur")),
-        CollectionEntry("ender_pearl", "Ender Pearl", "ENDER_PEARL".toInternalName()),
-        CollectionEntry("ghast_tear", "Ghast Tear", "GHAST_TEAR".toInternalName()),
+        CollectionEntry("spider_eye", "Spider Eye", "SPIDER_EYE".toInternalName(), aliases = listOf("spider")),
+        CollectionEntry("gunpowder", "Gunpowder", "SULPHUR".toInternalName(), aliases = listOf("creeper", "gunpowder_collection")),
+        CollectionEntry("ender_pearl", "Ender Pearl", "ENDER_PEARL".toInternalName(), aliases = listOf("enderman")),
+        CollectionEntry("ghast_tear", "Ghast Tear", "GHAST_TEAR".toInternalName(), aliases = listOf("ghast")),
         CollectionEntry("slimeball", "Slimeball", "SLIME_BALL".toInternalName(), aliases = listOf("slime_ball", "slime")),
-        CollectionEntry("blaze_rod", "Blaze Rod", "BLAZE_ROD".toInternalName()),
-        CollectionEntry("magma_cream", "Magma Cream", "MAGMA_CREAM".toInternalName()),
+        CollectionEntry("blaze_rod", "Blaze Rod", "BLAZE_ROD".toInternalName(), aliases = listOf("blaze")),
+        CollectionEntry("magma_cream", "Magma Cream", "MAGMA_CREAM".toInternalName(), aliases = listOf("magma")),
         CollectionEntry("chili_pepper", "Chili Pepper", "CHILI_PEPPER".toInternalName()),
 
         // Foraging
-        CollectionEntry("oak_wood", "Oak Wood", "LOG".toInternalName(), aliases = listOf("oak", "oak_log")),
-        CollectionEntry("spruce_wood", "Spruce Wood", "LOG:1".toInternalName(), aliases = listOf("spruce", "spruce_log")),
-        CollectionEntry("birch_wood", "Birch Wood", "LOG:2".toInternalName(), aliases = listOf("birch", "birch_log")),
-        CollectionEntry("jungle_wood", "Jungle Wood", "LOG:3".toInternalName(), aliases = listOf("jungle", "jungle_log")),
-        CollectionEntry("acacia_wood", "Acacia Wood", "LOG_2".toInternalName(), aliases = listOf("acacia", "acacia_log")),
-        CollectionEntry("dark_oak_wood", "Dark Oak Wood", "LOG_2:1".toInternalName(), aliases = listOf("dark_oak", "dark_oak_log")),
+        CollectionEntry("oak_wood", "Oak Wood", "LOG".toInternalName(), aliases = listOf("oak", "oak_log", "log")),
+        CollectionEntry("spruce_wood", "Spruce Wood", "LOG-1".toInternalName(), aliases = listOf("spruce", "spruce_log", "log:1", "log-1")),
+        CollectionEntry("birch_wood", "Birch Wood", "LOG-2".toInternalName(), aliases = listOf("birch", "birch_log", "log:2", "log-2")),
+        CollectionEntry("jungle_wood", "Jungle Wood", "LOG-3".toInternalName(), aliases = listOf("jungle", "jungle_log", "log:3", "log-3")),
+        CollectionEntry("acacia_wood", "Acacia Wood", "LOG_2".toInternalName(), aliases = listOf("acacia", "acacia_log", "log_2")),
+        CollectionEntry("dark_oak_wood", "Dark Oak Wood", "LOG_2-1".toInternalName(), aliases = listOf("dark_oak", "dark_oak_log", "log_2:1", "log_2-1")),
+        CollectionEntry("mangrove_log", "Mangrove Log", "MANGROVE_LOG".toInternalName(), aliases = listOf("mangrove")),
+        CollectionEntry("fig_log", "Fig Log", "FIG_LOG".toInternalName(), aliases = listOf("fig")),
+        CollectionEntry("helix_log", "Helix Log", "HELIX_LOG".toInternalName(), aliases = listOf("helix")),
+        CollectionEntry("tender_wood", "Tender Wood", "TENDER_WOOD".toInternalName(), aliases = listOf("tender")),
+        CollectionEntry("honeycomb", "Honeycomb", "HONEYCOMB".toInternalName()),
+        CollectionEntry("vinesap", "Vinesap", "VINESAP".toInternalName()),
+        CollectionEntry("sea_lumies", "Sea Lumies", "SEA_LUMIES".toInternalName()),
+        CollectionEntry("ruby_veilshroom", "Ruby Veilshroom", "RUBY_VEILSHROOM".toInternalName()),
+        CollectionEntry("lushlilac", "Lushlilac", "LUSHLILAC".toInternalName()),
 
         // Fishing
-        CollectionEntry("raw_fish", "Raw Fish", "RAW_FISH".toInternalName(), aliases = listOf("fish")),
-        CollectionEntry("raw_salmon", "Raw Salmon", "RAW_FISH:1".toInternalName(), aliases = listOf("salmon")),
-        CollectionEntry("clownfish", "Clownfish", "RAW_FISH:2".toInternalName()),
-        CollectionEntry("pufferfish", "Pufferfish", "RAW_FISH:3".toInternalName()),
+        CollectionEntry("raw_fish", "Raw Fish", "RAW_FISH".toInternalName(), aliases = listOf("fish", "cod", "raw_cod")),
+        CollectionEntry("raw_salmon", "Raw Salmon", "RAW_FISH-1".toInternalName(), aliases = listOf("salmon", "raw_fish:1", "raw_fish-1")),
+        CollectionEntry("clownfish", "Clownfish", "RAW_FISH-2".toInternalName(), aliases = listOf("tropical_fish", "clown_fish", "raw_fish:2", "raw_fish-2")),
+        CollectionEntry("pufferfish", "Pufferfish", "RAW_FISH-3".toInternalName(), aliases = listOf("puffer_fish", "raw_fish:3", "raw_fish-3")),
         CollectionEntry("prismarine_shard", "Prismarine Shard", "PRISMARINE_SHARD".toInternalName()),
         CollectionEntry("prismarine_crystals", "Prismarine Crystals", "PRISMARINE_CRYSTALS".toInternalName()),
         CollectionEntry("clay", "Clay", "CLAY_BALL".toInternalName(), aliases = listOf("clay_ball")),
         CollectionEntry("water_lily", "Water Lily", "WATER_LILY".toInternalName(), aliases = listOf("lily_pad")),
-        CollectionEntry("ink_sack", "Ink Sack", "INK_SACK".toInternalName(), aliases = listOf("ink")),
+        CollectionEntry("ink_sack", "Ink Sac", "INK_SACK".toInternalName(), aliases = listOf("ink", "ink_sac")),
         CollectionEntry("sponge", "Sponge", "SPONGE".toInternalName()),
         CollectionEntry("magmafish", "Magmafish", "MAGMA_FISH".toInternalName(), aliases = listOf("magma_fish")),
+        CollectionEntry("lotus", "Lotus", "LOTUS".toInternalName()),
 
         // Rift
-        CollectionEntry("wilted_berberis", "Wilted Berberis", "WILTED_BERBERIS".toInternalName()),
-        CollectionEntry("living_metal", "Living Metal", "LIVING_METAL".toInternalName()),
+        CollectionEntry("wilted_berberis", "Wilted Berberis", "WILTED_BERBERIS".toInternalName(), aliases = listOf("berberis")),
+        CollectionEntry("living_metal", "Living Metal", "METAL_HEART".toInternalName(), aliases = listOf("living_metal_heart", "metal_heart")),
         CollectionEntry("hemovibe", "Hemovibe", "HEMOVIBE".toInternalName()),
+        CollectionEntry("caducous_stem", "Caducous Stem", "CADUCOUS_STEM".toInternalName(), aliases = listOf("stem")),
+        CollectionEntry("agaricus_cap", "Agaricus Cap", "AGARICUS_CAP".toInternalName(), aliases = listOf("cap")),
+        CollectionEntry("half_eaten_carrot", "Half-Eaten Carrot", "HALF_EATEN_CARROT".toInternalName(), aliases = listOf("eaten_carrot")),
+        CollectionEntry("timite", "Timite", "TIMITE".toInternalName()),
 
         // Boss Collections
         CollectionEntry("bonzo", "Bonzo", "BONZO_MASK".toInternalName(), dungeonFloor = DungeonFloor.F1, aliases = listOf("f1", "m1")),
@@ -175,7 +193,7 @@ object CollectionGoalTracker {
     )
 
     // Pre-indexed lookup maps for O(1) matching
-    private val byKey: Map<String, CollectionEntry> = ALL_COLLECTIONS.associateBy { it.key }
+    val byKey: Map<String, CollectionEntry> = ALL_COLLECTIONS.associateBy { it.key }
     private val byAlias: Map<String, CollectionEntry> = buildMap {
         for (entry in ALL_COLLECTIONS) {
             put(entry.key, entry)
@@ -184,10 +202,21 @@ object CollectionGoalTracker {
             for (alias in entry.aliases) {
                 put(alias.lowercase(), entry)
                 put(alias.lowercase().replace(" ", "_"), entry)
+                put(alias.lowercase().replace("-", "_"), entry)
+                put(alias.lowercase().replace(":", "_"), entry)
             }
         }
     }
-    private val byInternalName: Map<String, CollectionEntry> = ALL_COLLECTIONS.associateBy { it.internalName.asString().uppercase() }
+    private val byInternalName: Map<String, CollectionEntry> = buildMap {
+        for (entry in ALL_COLLECTIONS) {
+            val raw = entry.internalName.asString().uppercase()
+            put(raw, entry)
+            put(raw.replace(':', '-'), entry)
+            put(raw.replace('-', ':'), entry)
+            put(raw.replace(':', '_'), entry)
+            put(raw.replace('-', '_'), entry)
+        }
+    }
 
     private val cachedSuggestions: List<String> = buildList {
         for (entry in ALL_COLLECTIONS) {
@@ -264,21 +293,38 @@ object CollectionGoalTracker {
             }
         }
 
-        // 3. Check CollectionApi
+        // 3. Check CollectionApi by internalName
         CollectionApi.getCollectionCounter(entry.internalName)?.let { counter ->
             if (counter > maxAmount) {
                 maxAmount = counter
             }
         }
 
-        // 4. Special aliases / multi-item fallback
-        if (entry.key == "leather" || entry.key == "raw_beef") {
-            CollectionApi.getCollectionCounter("LEATHER".toInternalName())?.let { if (it > maxAmount) maxAmount = it }
-            CollectionApi.getCollectionCounter("RAW_BEEF".toInternalName())?.let { if (it > maxAmount) maxAmount = it }
+        // 4. Check CollectionApi by key and displayName
+        CollectionApi.getCollectionCounterByName(entry.key)?.let { counter ->
+            if (counter > maxAmount) {
+                maxAmount = counter
+            }
         }
-        if (entry.key == "mutton") {
-            CollectionApi.getCollectionCounter("MUTTON".toInternalName())?.let { if (it > maxAmount) maxAmount = it }
-            CollectionApi.getCollectionCounter("RAW_MUTTON".toInternalName())?.let { if (it > maxAmount) maxAmount = it }
+        CollectionApi.getCollectionCounterByName(entry.displayName)?.let { counter ->
+            if (counter > maxAmount) {
+                maxAmount = counter
+            }
+        }
+
+        // 5. Check CollectionApi for all aliases
+        for (alias in entry.aliases) {
+            CollectionApi.getCollectionCounterByName(alias)?.let { counter ->
+                if (counter > maxAmount) {
+                    maxAmount = counter
+                }
+            }
+            val aliasInternal = alias.uppercase().replace(" ", "_").toInternalName()
+            CollectionApi.getCollectionCounter(aliasInternal)?.let { counter ->
+                if (counter > maxAmount) {
+                    maxAmount = counter
+                }
+            }
         }
 
         return maxAmount
@@ -337,17 +383,24 @@ object CollectionGoalTracker {
         val clean = query.trim().lowercase().replace(" ", "_").replace("-", "_")
         if (clean.isEmpty()) return null
 
-        // 1. O(1) match by exact key, name, or alias
-        byAlias[clean]?.let { return it }
+        // 1. O(1) match by exact key
+        byKey[clean]?.let { return it }
 
         // 2. O(1) match by internal name
         val upper = query.trim().uppercase().replace(" ", "_")
         byInternalName[upper]?.let { return it }
+        byInternalName[upper.replace(':', '-')]?.let { return it }
+        byInternalName[upper.replace('-', ':')]?.let { return it }
+        byInternalName[upper.replace('_', '-')]?.let { return it }
+        byInternalName[upper.replace('_', ':')]?.let { return it }
 
-        // 3. Fallback prefix search
+        // 3. O(1) match by exact name or alias
+        byAlias[clean]?.let { return it }
+
+        // 4. Fallback prefix search
         ALL_COLLECTIONS.firstOrNull { it.key.startsWith(clean) || it.displayName.lowercase().startsWith(clean) }?.let { return it }
 
-        // 4. Fallback contains search
+        // 5. Fallback contains search
         ALL_COLLECTIONS.firstOrNull { it.key.contains(clean) || it.displayName.lowercase().contains(clean) }?.let { return it }
 
         return null

@@ -1,5 +1,6 @@
 package at.hannibal2.skyhanni.test.inventory
 
+import at.hannibal2.skyhanni.api.CollectionApi
 import at.hannibal2.skyhanni.features.dungeon.DungeonFloor
 import at.hannibal2.skyhanni.features.inventory.collections.CollectionGoalTracker
 import at.hannibal2.skyhanni.features.inventory.collections.CollectionGoalTracker.GoalCommandResult
@@ -248,5 +249,142 @@ class CollectionGoalTrackerTest {
         assertEquals(140, bar.width)
         assertEquals(7, bar.height)
         assertEquals(HorizontalAlignment.CENTER, bar.horizontalAlign)
+    }
+
+    @Test
+    fun testAllCollectionsResolution() {
+        assertTrue(CollectionGoalTracker.ALL_COLLECTIONS.size >= 97, "Expected at least 97 collections but found ${CollectionGoalTracker.ALL_COLLECTIONS.size}")
+
+        for (entry in CollectionGoalTracker.ALL_COLLECTIONS) {
+            // Test resolution by key
+            val resolvedByKey = CollectionGoalTracker.resolveCollection(entry.key)
+            assertNotNull(resolvedByKey, "Collection with key '${entry.key}' failed to resolve by key")
+            assertEquals(entry.key, resolvedByKey?.key, "Key resolution mismatch for '${entry.key}'")
+
+            // Test resolution by display name
+            val resolvedByName = CollectionGoalTracker.resolveCollection(entry.displayName)
+            assertNotNull(resolvedByName, "Collection with key '${entry.key}' failed to resolve by displayName '${entry.displayName}'")
+            assertEquals(entry.key, resolvedByName?.key, "DisplayName resolution mismatch for '${entry.displayName}'")
+
+            // Test resolution by internalName
+            val resolvedByInternal = CollectionGoalTracker.resolveCollection(entry.internalName.asString())
+            assertNotNull(resolvedByInternal, "Collection with key '${entry.key}' failed to resolve by internalName '${entry.internalName}'")
+
+            // Test resolution by colon/hyphen variants if applicable
+            val rawInternal = entry.internalName.asString()
+            if (rawInternal.contains('-')) {
+                val colonVariant = rawInternal.replace('-', ':')
+                val resolvedByColon = CollectionGoalTracker.resolveCollection(colonVariant)
+                assertNotNull(resolvedByColon, "Collection '${entry.key}' failed to resolve by colon variant '$colonVariant'")
+                assertEquals(entry.key, resolvedByColon?.key)
+            } else if (rawInternal.contains(':')) {
+                val hyphenVariant = rawInternal.replace(':', '-')
+                val resolvedByHyphen = CollectionGoalTracker.resolveCollection(hyphenVariant)
+                assertNotNull(resolvedByHyphen, "Collection '${entry.key}' failed to resolve by hyphen variant '$hyphenVariant'")
+                assertEquals(entry.key, resolvedByHyphen?.key)
+            }
+
+            // Test resolution for each alias
+            for (alias in entry.aliases) {
+                val resolvedByAlias = CollectionGoalTracker.resolveCollection(alias)
+                assertNotNull(resolvedByAlias, "Alias '$alias' for collection '${entry.key}' failed to resolve")
+            }
+        }
+    }
+
+    @Test
+    fun testLapisLazuliSpecificTracking() {
+        val lapis = CollectionGoalTracker.resolveCollection("lapis")
+        assertNotNull(lapis)
+        assertEquals("lapis_lazuli", lapis?.key)
+        assertEquals("Lapis Lazuli", lapis?.displayName)
+
+        val lapisWords = CollectionGoalTracker.resolveCollection("lapis lazuli")
+        assertNotNull(lapisWords)
+        assertEquals("lapis_lazuli", lapisWords?.key)
+
+        val lapisUnderscore = CollectionGoalTracker.resolveCollection("lapis_lazuli")
+        assertNotNull(lapisUnderscore)
+        assertEquals("lapis_lazuli", lapisUnderscore?.key)
+
+        val lapisColon = CollectionGoalTracker.resolveCollection("INK_SACK:4")
+        assertNotNull(lapisColon)
+        assertEquals("lapis_lazuli", lapisColon?.key)
+
+        val lapisHyphen = CollectionGoalTracker.resolveCollection("INK_SACK-4")
+        assertNotNull(lapisHyphen)
+        assertEquals("lapis_lazuli", lapisHyphen?.key)
+
+        val lapisCmd1 = CollectionGoalTracker.parseGoalCommand(arrayOf("lapis", "100k"))
+        assertTrue(lapisCmd1 is GoalCommandResult.SetGoal)
+        assertEquals("lapis_lazuli", (lapisCmd1 as GoalCommandResult.SetGoal).entry.key)
+        assertEquals(100_000L, lapisCmd1.amount)
+
+        val lapisCmd2 = CollectionGoalTracker.parseGoalCommand(arrayOf("lapis", "lazuli", "500k"))
+        assertTrue(lapisCmd2 is GoalCommandResult.SetGoal)
+        assertEquals("lapis_lazuli", (lapisCmd2 as GoalCommandResult.SetGoal).entry.key)
+        assertEquals(500_000L, lapisCmd2.amount)
+
+        val lapisCmd3 = CollectionGoalTracker.parseGoalCommand(arrayOf("INK_SACK:4", "2m"))
+        assertTrue(lapisCmd3 is GoalCommandResult.SetGoal)
+        assertEquals("lapis_lazuli", (lapisCmd3 as GoalCommandResult.SetGoal).entry.key)
+        assertEquals(2_000_000L, lapisCmd3.amount)
+
+        // Test CollectionApi counter retrieval with colon vs dash
+        CollectionApi.collectionValue.clear()
+        CollectionApi.collectionByName.clear()
+
+        // Simulate Hypixel API storing under colon format: INK_SACK:4
+        CollectionApi.saveCollection("INK_SACK:4".toInternalName(), "Lapis Lazuli", 350_000L)
+        val amountWithColon = CollectionGoalTracker.getAmount(lapis!!)
+        assertEquals(350_000L, amountWithColon)
+
+        // Simulate updating via dash format: INK_SACK-4
+        CollectionApi.saveCollection("INK_SACK-4".toInternalName(), "Lapis Lazuli", 500_000L)
+        val amountWithDash = CollectionGoalTracker.getAmount(lapis)
+        assertEquals(500_000L, amountWithDash)
+
+        // Clean up
+        CollectionApi.collectionValue.clear()
+        CollectionApi.collectionByName.clear()
+    }
+
+    @Test
+    fun testColonAndDashCollectionVariants() {
+        val pairs = listOf(
+            "cocoa_beans" to ("INK_SACK-3" to "INK_SACK:3"),
+            "red_sand" to ("SAND-1" to "SAND:1"),
+            "spruce_wood" to ("LOG-1" to "LOG:1"),
+            "birch_wood" to ("LOG-2" to "LOG:2"),
+            "jungle_wood" to ("LOG-3" to "LOG:3"),
+            "dark_oak_wood" to ("LOG_2-1" to "LOG_2:1"),
+            "raw_salmon" to ("RAW_FISH-1" to "RAW_FISH:1"),
+            "clownfish" to ("RAW_FISH-2" to "RAW_FISH:2"),
+            "pufferfish" to ("RAW_FISH-3" to "RAW_FISH:3"),
+        )
+
+        for ((key, ids) in pairs) {
+            val (dashId, colonId) = ids
+            val entryDash = CollectionGoalTracker.resolveCollection(dashId)
+            assertNotNull(entryDash, "Failed to resolve by dash id '$dashId'")
+            assertEquals(key, entryDash?.key)
+
+            val entryColon = CollectionGoalTracker.resolveCollection(colonId)
+            assertNotNull(entryColon, "Failed to resolve by colon id '$colonId'")
+            assertEquals(key, entryColon?.key)
+
+            // Test CollectionApi bi-directional lookup
+            CollectionApi.collectionValue.clear()
+            CollectionApi.collectionByName.clear()
+
+            CollectionApi.saveCollection(colonId.toInternalName(), entryColon!!.displayName, 123_456L)
+            assertEquals(123_456L, CollectionGoalTracker.getAmount(entryColon))
+            assertEquals(123_456L, CollectionApi.getCollectionCounter(dashId.toInternalName()))
+            assertEquals(123_456L, CollectionApi.getCollectionCounter(colonId.toInternalName()))
+            assertEquals(123_456L, CollectionApi.getCollectionCounterByName(key))
+        }
+
+        CollectionApi.collectionValue.clear()
+        CollectionApi.collectionByName.clear()
     }
 }
