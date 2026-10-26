@@ -18,6 +18,7 @@ import at.hannibal2.skyhanni.utils.ItemUtils.getInternalNameOrNull
 import at.hannibal2.skyhanni.utils.ItemUtils.itemNameWithoutColor
 import at.hannibal2.skyhanni.utils.ItemUtils.matchesItemName
 import at.hannibal2.skyhanni.utils.ItemUtils.repoItemName
+import at.hannibal2.skyhanni.utils.KeyboardManager.RIGHT_MOUSE
 import at.hannibal2.skyhanni.utils.NeuInternalName
 import at.hannibal2.skyhanni.utils.NeuInternalName.Companion.toInternalName
 import at.hannibal2.skyhanni.utils.NeuItems.getItemStackOrNull
@@ -34,9 +35,11 @@ import at.hannibal2.skyhanni.utils.compat.MinecraftCompat
 import at.hannibal2.skyhanni.utils.renderables.Renderable
 import at.hannibal2.skyhanni.utils.renderables.container.HorizontalContainerRenderable.Companion.horizontal
 import at.hannibal2.skyhanni.utils.renderables.primitives.ItemStackRenderable.Companion.item
+import at.hannibal2.skyhanni.utils.renderables.primitives.placeholder
 import at.hannibal2.skyhanni.utils.renderables.primitives.text
 import com.mojang.brigadier.suggestion.SuggestionProvider
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
+import net.minecraft.client.gui.screens.ChatScreen
 
 @SkyHanniModule
 object SackGoalTracker {
@@ -44,17 +47,12 @@ object SackGoalTracker {
     private val config get() = SkyHanniMod.feature.inventory.sackGoal
 
     var completedSoundPlayed = false
+    private val completedGoals = mutableSetOf<NeuInternalName>()
     private var display = listOf<Renderable>()
     private var dummyDisplay = listOf<Renderable>()
 
     // Optimization state caches
-    private var lastTrackedItem: String = ""
-    private var lastCurrent: Long = -1L
-    private var lastTarget: Long = -1L
-    private var lastBarWidth: Int = -1
-    private var lastBarHeight: Int = -1
-    private var cachedItemStack: SafeItemStack = SafeItemStack.EMPTY
-
+    private var cachedItemStacks = mutableMapOf<NeuInternalName, SafeItemStack>()
     private var dummyBarWidth: Int = -1
     private var dummyBarHeight: Int = -1
 
@@ -66,7 +64,7 @@ object SackGoalTracker {
 
     sealed class GoalCommandResult {
         data class SetGoal(val internalName: NeuInternalName, val amount: Long) : GoalCommandResult()
-        object ClearGoal : GoalCommandResult()
+        data class ClearGoal(val internalName: NeuInternalName? = null) : GoalCommandResult()
         object ShowStatus : GoalCommandResult()
         data class Error(val message: String) : GoalCommandResult()
     }
@@ -185,10 +183,21 @@ object SackGoalTracker {
         builder.buildFuture()
     }
 
+    private val activeGoalSuggestions = SuggestionProvider<FabricClientCommandSource> { _, builder ->
+        val remaining = builder.remainingLowerCase
+        val candidates = config.getGoals().keys.map { it.asString().lowercase() }
+        for (item in candidates) {
+            if (remaining.isEmpty() || item.contains(remaining)) {
+                builder.suggest(item)
+            }
+        }
+        builder.buildFuture()
+    }
+
     init {
         RenderDisplayHelper(
             outsideInventory = true,
-            inOwnInventory = true,
+            inOwnInventory = false,
             condition = { SkyBlockUtils.inSkyBlock && config.enabled && (hasActiveGoal() || GuiEditManager.isInGui()) },
             onRender = {
                 val toRender = if (hasActiveGoal()) display else dummyDisplay
@@ -197,37 +206,58 @@ object SackGoalTracker {
         )
     }
 
-    fun hasActiveGoal(): Boolean = config.trackedItemInternalName.isNotEmpty() && config.targetGoalAmount > 0L
+    fun hasActiveGoal(): Boolean = config.getGoals().isNotEmpty()
+
+    fun getAmount(internalName: NeuInternalName): Long =
+        SackApi.run { internalName.getAmountInSacks().toLong() }
 
     fun getCurrentAmount(): Long {
         val internalName = config.trackedItemInternalName
         if (internalName.isEmpty()) return 0L
-        return SackApi.run { internalName.toInternalName().getAmountInSacks().toLong() }
+        return getAmount(internalName.toInternalName())
     }
 
     fun setGoal(internalName: NeuInternalName, amount: Long) {
+        config.activeGoals[internalName.asString()] = amount
         config.trackedItemInternalName = internalName.asString()
         config.targetGoalAmount = amount
+        completedGoals.remove(internalName)
         completedSoundPlayed = false
         invalidateDisplayCache()
         update()
     }
 
+    fun removeGoal(internalName: NeuInternalName) {
+        config.activeGoals.remove(internalName.asString())
+        if (config.trackedItemInternalName.equals(internalName.asString(), ignoreCase = true)) {
+            val remaining = config.activeGoals.entries.firstOrNull()
+            if (remaining != null) {
+                config.trackedItemInternalName = remaining.key
+                config.targetGoalAmount = remaining.value
+            } else {
+                config.trackedItemInternalName = ""
+                config.targetGoalAmount = 0L
+            }
+        }
+        completedGoals.remove(internalName)
+        invalidateDisplayCache()
+        update()
+        SoundUtils.playClickSound()
+        ChatUtils.chat("§e[Sack Goal] §7Removed goal for §b${internalName.repoItemName}§7.")
+    }
+
     fun clearGoal() {
+        config.activeGoals.clear()
         config.trackedItemInternalName = ""
         config.targetGoalAmount = 0L
+        completedGoals.clear()
         completedSoundPlayed = false
         invalidateDisplayCache()
         update()
     }
 
     private fun invalidateDisplayCache() {
-        lastTrackedItem = ""
-        lastCurrent = -1L
-        lastTarget = -1L
-        lastBarWidth = -1
-        lastBarHeight = -1
-        cachedItemStack = SafeItemStack.EMPTY
+        cachedItemStacks.clear()
     }
 
     fun resolveTrackedItem(query: String): NeuInternalName? {
@@ -277,7 +307,7 @@ object SackGoalTracker {
         if (args.size == 1) {
             val first = args[0]
             if (first.equals("clear", ignoreCase = true) || first.equals("reset", ignoreCase = true)) {
-                return GoalCommandResult.ClearGoal
+                return GoalCommandResult.ClearGoal(null)
             }
             val amount = first.formatLongOrNull()
             if (amount != null && amount > 0L) {
@@ -287,6 +317,13 @@ object SackGoalTracker {
                 return GoalCommandResult.Error("Please specify an item to track, or hold a sack item! Example: /setsackgoal melon $first")
             }
             return GoalCommandResult.Error("Please specify a target amount! Example: /setsackgoal $first 100k")
+        }
+
+        // Support /setsackgoal clear <item> or /setsackgoal remove <item>
+        if (args[0].equals("clear", ignoreCase = true) || args[0].equals("remove", ignoreCase = true) || args[0].equals("delete", ignoreCase = true)) {
+            val query = args.drop(1).joinToString(" ").trim()
+            val item = resolveTrackedItem(query) ?: return GoalCommandResult.Error("Could not find sack item for '$query'!")
+            return GoalCommandResult.ClearGoal(item)
         }
 
         // Check if last argument is the amount: /setsackgoal enchanted melon 100k
@@ -312,15 +349,17 @@ object SackGoalTracker {
 
     private fun handleGoalCommand(args: Array<String>) {
         if (args.isEmpty()) {
-            if (hasActiveGoal()) {
-                val current = getCurrentAmount()
-                val target = config.targetGoalAmount
-                val percent = (current.toDouble() / target).coerceAtLeast(0.0) * 100.0
-                val item = config.trackedItemInternalName.toInternalName()
-                ChatUtils.chat("§a[Sack Goal] Currently tracking §e${item.repoItemName}§7: §a${current.addSeparators()} §7/ §e${target.addSeparators()} §b(%.1f%%)".format(percent))
-                ChatUtils.chat("§7Use §e/setsackgoal <item> <amount> §7to update or §e/clearsackgoal §7to clear.")
+            val goals = config.getGoals()
+            if (goals.isNotEmpty()) {
+                ChatUtils.chat("§a[Sack Goal] Currently tracking ${goals.size} goal(s):")
+                for ((item, target) in goals) {
+                    val current = getAmount(item)
+                    val percent = (current.toDouble() / target).coerceAtLeast(0.0) * 100.0
+                    ChatUtils.chat("  §7- §e${item.repoItemName}§7: §a${current.addSeparators()} §7/ §e${target.addSeparators()} §b(%.1f%%)".format(percent))
+                }
+                ChatUtils.chat("§7Use §e/setsackgoal <item> <amount> §7to add/update or §e/clearsackgoal [item] §7to remove.")
             } else {
-                ChatUtils.chat("§e[Sack Goal] No goal currently set. Usage: /setsackgoal <item> <amount> or hold an item and type /setsackgoal <amount>")
+                ChatUtils.chat("§e[Sack Goal] No goals currently set. Usage: /setsackgoal <item> <amount> or hold an item and type /setsackgoal <amount>")
             }
             return
         }
@@ -329,12 +368,15 @@ object SackGoalTracker {
         when (val result = parseGoalCommand(args, heldItem)) {
             is GoalCommandResult.SetGoal -> {
                 setGoal(result.internalName, result.amount)
-                val current = getCurrentAmount()
+                val current = getAmount(result.internalName)
                 ChatUtils.chat("§a[Sack Goal] Now tracking §e${result.amount.addSeparators()}x ${result.internalName.repoItemName} §a(${current.addSeparators()} currently in sacks)")
             }
             is GoalCommandResult.ClearGoal -> {
-                clearGoal()
-                ChatUtils.chat("§a[Sack Goal] Goal cleared!")
+                if (result.internalName != null) {
+                    removeGoal(result.internalName)
+                } else {
+                    handleClearCommand(emptyArray())
+                }
             }
             is GoalCommandResult.ShowStatus -> {
                 handleGoalCommand(emptyArray())
@@ -345,9 +387,52 @@ object SackGoalTracker {
         }
     }
 
-    private fun handleClearCommand() {
-        clearGoal()
-        ChatUtils.chat("§a[Sack Goal] Goal cleared!")
+    private fun handleClearCommand(args: Array<String> = emptyArray()) {
+        val goals = config.getGoals()
+        if (goals.isEmpty()) {
+            ChatUtils.chat("§e[Sack Goal] No active goals to remove.")
+            return
+        }
+
+        if (args.isNotEmpty()) {
+            val query = args.joinToString(" ").trim()
+            val item = resolveTrackedItem(query)
+            if (item != null && goals.containsKey(item)) {
+                removeGoal(item)
+                return
+            } else if (item != null) {
+                ChatUtils.userError("Goal for ${item.repoItemName} is not currently active!")
+                return
+            } else {
+                ChatUtils.userError("Could not find sack item for '$query'!")
+                return
+            }
+        }
+
+        if (goals.size == 1) {
+            clearGoal()
+            ChatUtils.chat("§a[Sack Goal] Goal cleared!")
+            return
+        }
+
+        // Multiple goals active: list them with clickable remove buttons
+        ChatUtils.chat("§e[Sack Goal] §7Active goals (click to remove):")
+        for ((item, target) in goals) {
+            val current = getAmount(item)
+            ChatUtils.clickableChat(
+                "  §7- §e${item.repoItemName}§7: §a${current.addSeparators()} §7/ §e${target.addSeparators()} §c[✕ Remove]",
+                onClick = { removeGoal(item) },
+                hover = "§cClick to remove this goal",
+            )
+        }
+        ChatUtils.clickableChat(
+            "§c[Remove All Goals]",
+            onClick = {
+                clearGoal()
+                ChatUtils.chat("§a[Sack Goal] All goals cleared!")
+            },
+            hover = "§cClick to clear all sack goals",
+        )
     }
 
     fun createProgressBar(progress: Double, width: Int, height: Int): Renderable = object : Renderable {
@@ -371,7 +456,12 @@ object SackGoalTracker {
         }
     }
 
-    private fun buildDisplay(internalName: NeuInternalName, itemStack: SafeItemStack, current: Long, target: Long): List<Renderable> {
+    private fun buildSingleGoalDisplay(
+        internalName: NeuInternalName,
+        itemStack: SafeItemStack,
+        current: Long,
+        target: Long,
+    ): List<Renderable> {
         val progress = (current.toDouble() / target.coerceAtLeast(1L)).coerceAtLeast(0.0)
         val percentage = progress * 100.0
         val percentStr = "%.1f%%".format(percentage)
@@ -380,18 +470,38 @@ object SackGoalTracker {
         val list = mutableListOf<Renderable>()
 
         val titleText = "§e${internalName.repoItemName} §7Goal"
-        val header = if (!itemStack.isEmpty) {
-            Renderable.horizontal(
-                Renderable.item({ itemStack }),
-                Renderable.text(titleText, horizontalAlign = RenderUtils.HorizontalAlignment.CENTER),
-                spacing = 2,
-                horizontalAlign = RenderUtils.HorizontalAlignment.CENTER,
-                verticalAlign = RenderUtils.VerticalAlignment.CENTER,
-            )
-        } else {
-            Renderable.text(titleText, horizontalAlign = RenderUtils.HorizontalAlignment.CENTER)
+        val removeButton = Renderable.clickable(
+            Renderable.text("§c ✕"),
+            onLeftClick = { removeGoal(internalName) },
+            bypassChecks = true,
+            tips = listOf("§cClick to remove this goal"),
+        )
+
+        val headerElements = mutableListOf<Renderable>()
+        if (!itemStack.isEmpty) {
+            headerElements.add(Renderable.item({ itemStack }))
         }
-        list.add(header)
+        headerElements.add(Renderable.text(titleText, horizontalAlign = RenderUtils.HorizontalAlignment.CENTER))
+
+        val isInGui = MinecraftCompat.screen?.let { it !is ChatScreen } ?: false
+        if (isInGui) {
+            headerElements.add(removeButton)
+        }
+
+        val header = Renderable.horizontal(
+            headerElements,
+            spacing = 2,
+            horizontalAlign = RenderUtils.HorizontalAlignment.CENTER,
+            verticalAlign = RenderUtils.VerticalAlignment.CENTER,
+        )
+
+        val clickableHeader = Renderable.clickable(
+            header,
+            onAnyClick = mapOf(RIGHT_MOUSE to { removeGoal(internalName) }),
+            bypassChecks = true,
+            tips = if (isInGui) listOf("§eRight-click to remove this goal") else null,
+        )
+        list.add(clickableHeader)
 
         list.add(createProgressBar(progress, config.barWidth, config.barHeight))
 
@@ -406,44 +516,41 @@ object SackGoalTracker {
     }
 
     fun update() {
-        val internalNameStr = config.trackedItemInternalName
-        val target = config.targetGoalAmount
+        if (!config.enabled) return
 
-        if (internalNameStr.isNotEmpty() && target > 0L) {
-            val internalName = internalNameStr.toInternalName()
-            val current = SackApi.run { internalName.getAmountInSacks().toLong() }
+        val goals = config.getGoals()
+        if (goals.isNotEmpty()) {
+            val fullList = mutableListOf<Renderable>()
+            var anyJustCompleted = false
 
-            if (internalNameStr != lastTrackedItem) {
-                cachedItemStack = runCatching { internalName.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
-            }
-
-            if (internalNameStr != lastTrackedItem || current != lastCurrent || target != lastTarget ||
-                config.barWidth != lastBarWidth || config.barHeight != lastBarHeight) {
-                lastTrackedItem = internalNameStr
-                lastCurrent = current
-                lastTarget = target
-                lastBarWidth = config.barWidth
-                lastBarHeight = config.barHeight
-                display = buildDisplay(internalName, cachedItemStack, current, target)
-            }
-
-            if (current >= target) {
-                if (!completedSoundPlayed) {
-                    completedSoundPlayed = true
-                    if (config.dingOnComplete) {
-                        SoundUtils.plingSound.playSound()
-                    }
-                    ChatUtils.chat("§a[Sack Goal] §6Goal of ${target.addSeparators()}x ${internalName.repoItemName} reached!")
+            for ((internalName, target) in goals) {
+                val current = getAmount(internalName)
+                val itemStack = cachedItemStacks.getOrPut(internalName) {
+                    runCatching { internalName.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
                 }
-            } else {
-                completedSoundPlayed = false
+                if (fullList.isNotEmpty()) {
+                    fullList.add(Renderable.placeholder(0, 4))
+                }
+                fullList.addAll(buildSingleGoalDisplay(internalName, itemStack, current, target))
+
+                if (current >= target && !completedGoals.contains(internalName)) {
+                    completedGoals.add(internalName)
+                    anyJustCompleted = true
+                    ChatUtils.chat("§a[Sack Goal] §6Goal of ${target.addSeparators()}x ${internalName.repoItemName} reached!")
+                } else if (current < target) {
+                    completedGoals.remove(internalName)
+                }
             }
+
+            if (anyJustCompleted && config.dingOnComplete) {
+                SoundUtils.plingSound.playSound()
+            }
+            display = fullList
         } else {
             if (display.isNotEmpty()) {
                 display = emptyList()
             }
-            lastTrackedItem = ""
-            lastCurrent = -1L
+            completedGoals.clear()
             completedSoundPlayed = false
         }
 
@@ -452,7 +559,7 @@ object SackGoalTracker {
             dummyBarHeight = config.barHeight
             val dummyItem = "ENCHANTED_MELON".toInternalName()
             val dummyStack = runCatching { dummyItem.getItemStackOrNull() }.getOrNull() ?: SafeItemStack.EMPTY
-            dummyDisplay = buildDisplay(
+            dummyDisplay = buildSingleGoalDisplay(
                 dummyItem,
                 dummyStack,
                 75_000L,
@@ -503,7 +610,7 @@ object SackGoalTracker {
                 callback {
                     val item = getArg(itemArg)
                     if (item.equals("clear", ignoreCase = true) || item.equals("reset", ignoreCase = true)) {
-                        handleClearCommand()
+                        handleClearCommand(emptyArray())
                     } else {
                         handleGoalCommand(arrayOf(item))
                     }
@@ -512,10 +619,17 @@ object SackGoalTracker {
         }
 
         event.registerBrigadier("clearsackgoal") {
-            description = "Clear your current sack collection goal"
+            description = "Clear your current sack collection goal(s)"
             category = CommandCategory.USERS_ACTIVE
             aliases = listOf("resetsackgoal")
-            legacyCallbackArgs { handleClearCommand() }
+            simpleCallback {
+                handleClearCommand(emptyArray())
+            }
+            arg("item", BrigadierArguments.string(), activeGoalSuggestions) { itemArg ->
+                callback {
+                    handleClearCommand(arrayOf(getArg(itemArg)))
+                }
+            }
         }
     }
 }

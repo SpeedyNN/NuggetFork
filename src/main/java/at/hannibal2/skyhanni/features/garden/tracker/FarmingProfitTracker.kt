@@ -84,7 +84,7 @@ object FarmingProfitTracker : SkyHanniBucketedItemTracker<TrackedSource, Farming
     )
 
     init {
-        initRenderer({ config.position }, onlyOnIsland = IslandType.GARDEN) { shouldShowDisplay() }
+        initRenderer({ config.position }, inOwnInventory = false, onlyOnIsland = IslandType.GARDEN) { shouldShowDisplay() }
     }
 
     override fun startSessionUptime() {

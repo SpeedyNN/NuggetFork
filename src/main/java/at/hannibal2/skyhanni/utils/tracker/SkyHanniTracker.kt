@@ -335,13 +335,14 @@ open class SkyHanniTracker<Data : TrackerData<*>, Config : GenericIndividualTrac
     fun initRenderer(
         position: () -> Position,
         inventory: InventoryDetector = RenderDisplayHelper.NO_INVENTORY,
+        inOwnInventory: Boolean = true,
         onlyOnIsland: IslandType? = null,
         condition: () -> Boolean,
     ) {
         RenderDisplayHelper(
             inventory,
             outsideInventory = true,
-            inOwnInventory = true,
+            inOwnInventory = inOwnInventory,
             condition = condition,
             onlyOnIsland = onlyOnIsland,
             onRender = {

@@ -6,6 +6,7 @@ import at.hannibal2.skyhanni.features.inventory.sacks.SackGoalTracker.GoalComman
 import at.hannibal2.skyhanni.utils.NeuInternalName.Companion.toInternalName
 import at.hannibal2.skyhanni.utils.RenderUtils.HorizontalAlignment
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -21,9 +22,14 @@ class SackGoalTrackerTest {
     fun testParseGoalCommandClear() {
         val clearResult = SackGoalTracker.parseGoalCommand(arrayOf("clear"))
         assertTrue(clearResult is GoalCommandResult.ClearGoal)
+        assertNull((clearResult as GoalCommandResult.ClearGoal).internalName)
 
         val resetResult = SackGoalTracker.parseGoalCommand(arrayOf("reset"))
         assertTrue(resetResult is GoalCommandResult.ClearGoal)
+
+        val clearSpecific = SackGoalTracker.parseGoalCommand(arrayOf("clear", "melon"))
+        assertTrue(clearSpecific is GoalCommandResult.ClearGoal)
+        assertEquals(FarmingProfitTrackerCrops.MELON, (clearSpecific as GoalCommandResult.ClearGoal).internalName)
     }
 
     @Test

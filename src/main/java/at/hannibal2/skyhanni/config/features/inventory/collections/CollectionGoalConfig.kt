@@ -40,5 +40,20 @@ class CollectionGoalConfig {
 
     @Expose
     var targetGoalAmount: Long = 0L
-}
 
+    @Expose
+    var activeGoals: MutableMap<String, Long> = mutableMapOf()
+
+    fun getGoals(): Map<String, Long> {
+        val result = mutableMapOf<String, Long>()
+        for ((key, target) in activeGoals) {
+            if (target > 0L) {
+                result[key] = target
+            }
+        }
+        if (result.isEmpty() && trackedCollectionKey.isNotEmpty() && targetGoalAmount > 0L) {
+            result[trackedCollectionKey] = targetGoalAmount
+        }
+        return result
+    }
+}

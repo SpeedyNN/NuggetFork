@@ -505,15 +505,70 @@ object FarmingProfitTrackerCrops {
         removeTrackedRawCrop(crop.getCropInternalName(), amount)
     }
 
-    private fun checkSuperCraft(message: String) {
+    internal fun checkSuperCraft(message: String) {
         val crafted = SuperCraftFeatures.parseCraftedItem(message) ?: return
-        if (crafted.internalName.isSuperEnchantedCrop()) {
-            val source = resolveCropTrackedSource(crafted.internalName)
-            if (!FarmingProfitTracker.config.enabled || !FarmingProfitTracker.shouldTrack(source) || crafted.amount <= 0) return
-            rememberSpecialCropItem(crafted.internalName, crafted.amount.toLong())
-            FarmingProfitTracker.addTrackedItem(source, crafted.internalName, crafted.amount.toLong(), message = false)
-            FarmingProfitTracker.markActivity()
+        if (crafted.amount <= 0) return
+        val cropDef = crafted.internalName.getCropTierDefinitionOrNull() ?: return
+        if (cropDef.rawMultiplier <= 1) return
+
+        val source = resolveCropTrackedSource(crafted.internalName)
+        if (!FarmingProfitTracker.config.enabled || !FarmingProfitTracker.shouldTrack(source)) return
+
+        val eligibleSources = CROP_SOURCES.filter { FarmingProfitTracker.shouldTrack(it) }
+        var rawUnitsNeeded = crafted.amount.toLong() * cropDef.rawMultiplier
+        var totalRawDeducted = 0L
+
+        FarmingProfitTracker.modify { data ->
+            val candidates = mutableListOf<SourceTrackedCandidate>()
+            for (src in eligibleSources) {
+                val bucketMap = data.bucketedItems[src] ?: continue
+                for ((itemKey, trackedItem) in bucketMap) {
+                    val count = trackedItem.totalAmount
+                    if (count <= 0) continue
+                    if (itemKey in cropDef.validCandidates) {
+                        val candDef = itemKey.getCropTierDefinitionOrNull() ?: continue
+                        if (candDef.crop == cropDef.crop && candDef.rawMultiplier < cropDef.rawMultiplier) {
+                            candidates.add(SourceTrackedCandidate(src, itemKey, candDef.rawMultiplier, count))
+                        }
+                    }
+                }
+            }
+
+            val sortedCandidates = candidates.sortedWith(
+                compareByDescending<SourceTrackedCandidate> { it.multiplier }
+                    .thenBy { candidateSourcePriority(it.source) }
+            )
+
+            for (candidate in sortedCandidates) {
+                if (rawUnitsNeeded <= 0L) break
+                val unitsNeeded = rawUnitsNeeded / candidate.multiplier
+                val toDeduct = minOf(candidate.available, unitsNeeded)
+                if (toDeduct > 0L) {
+                    var remaining = -toDeduct
+                    while (remaining != 0L) {
+                        val chunk = remaining.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+                        data.addItem(candidate.source, candidate.name, chunk, command = true)
+                        remaining -= chunk
+                    }
+                    val rawDeducted = toDeduct * candidate.multiplier
+                    rawUnitsNeeded -= rawDeducted
+                    totalRawDeducted += rawDeducted
+                }
+            }
+
+            // Always add the supercrafted item if it's super-enchanted or if lesser ingredients were deducted
+            if (totalRawDeducted > 0L || crafted.internalName.isSuperEnchantedCrop()) {
+                var remainingAdd = crafted.amount.toLong()
+                while (remainingAdd != 0L) {
+                    val chunk = remainingAdd.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+                    data.addItem(source, crafted.internalName, chunk, command = true)
+                    remainingAdd -= chunk
+                }
+            }
         }
+
+        rememberSpecialCropItem(crafted.internalName, crafted.amount.toLong())
+        FarmingProfitTracker.markActivity()
     }
 
     internal fun processCropCompaction(internalName: NeuInternalName, amount: Long) {

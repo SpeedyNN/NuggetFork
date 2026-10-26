@@ -2,6 +2,8 @@ package at.hannibal2.skyhanni.config.features.inventory.sacks
 
 import at.hannibal2.skyhanni.config.FeatureToggle
 import at.hannibal2.skyhanni.config.core.config.Position
+import at.hannibal2.skyhanni.utils.NeuInternalName
+import at.hannibal2.skyhanni.utils.NeuInternalName.Companion.toInternalName
 import com.google.gson.annotations.Expose
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorBoolean
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorSlider
@@ -40,5 +42,20 @@ class SackGoalConfig {
 
     @Expose
     var targetGoalAmount: Long = 0L
-}
 
+    @Expose
+    var activeGoals: MutableMap<String, Long> = mutableMapOf()
+
+    fun getGoals(): Map<NeuInternalName, Long> {
+        val result = mutableMapOf<NeuInternalName, Long>()
+        for ((key, target) in activeGoals) {
+            if (target > 0L) {
+                result[key.toInternalName()] = target
+            }
+        }
+        if (result.isEmpty() && trackedItemInternalName.isNotEmpty() && targetGoalAmount > 0L) {
+            result[trackedItemInternalName.toInternalName()] = targetGoalAmount
+        }
+        return result
+    }
+}
