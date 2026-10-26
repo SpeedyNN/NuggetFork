@@ -1,5 +1,6 @@
 package at.hannibal2.skyhanni.test.inventory
 
+import at.hannibal2.skyhanni.features.dungeon.DungeonFloor
 import at.hannibal2.skyhanni.features.inventory.collections.CollectionGoalTracker
 import at.hannibal2.skyhanni.features.inventory.collections.CollectionGoalTracker.GoalCommandResult
 import at.hannibal2.skyhanni.utils.NeuInternalName.Companion.toInternalName
@@ -141,6 +142,104 @@ class CollectionGoalTrackerTest {
 
         val magmafish = CollectionGoalTracker.resolveCollection("magmafish")
         assertNotNull(magmafish)
+    }
+
+    @Test
+    fun testBossCollectionsResolution() {
+        // Bonzo - F1 / M1
+        val bonzo = CollectionGoalTracker.resolveCollection("bonzo")
+        assertNotNull(bonzo)
+        assertEquals(DungeonFloor.F1, bonzo?.dungeonFloor)
+        assertEquals(DungeonFloor.F1, CollectionGoalTracker.resolveCollection("f1")?.dungeonFloor)
+        assertEquals(DungeonFloor.F1, CollectionGoalTracker.resolveCollection("m1")?.dungeonFloor)
+
+        // Scarf - F2 / M2
+        val scarf = CollectionGoalTracker.resolveCollection("scarf")
+        assertNotNull(scarf)
+        assertEquals(DungeonFloor.F2, scarf?.dungeonFloor)
+        assertEquals(DungeonFloor.F2, CollectionGoalTracker.resolveCollection("f2")?.dungeonFloor)
+        assertEquals(DungeonFloor.F2, CollectionGoalTracker.resolveCollection("m2")?.dungeonFloor)
+
+        // The Professor - F3 / M3
+        val prof = CollectionGoalTracker.resolveCollection("professor")
+        assertNotNull(prof)
+        assertEquals(DungeonFloor.F3, prof?.dungeonFloor)
+        assertEquals(DungeonFloor.F3, CollectionGoalTracker.resolveCollection("the_professor")?.dungeonFloor)
+        assertEquals(DungeonFloor.F3, CollectionGoalTracker.resolveCollection("the professor")?.dungeonFloor)
+        assertEquals(DungeonFloor.F3, CollectionGoalTracker.resolveCollection("f3")?.dungeonFloor)
+        assertEquals(DungeonFloor.F3, CollectionGoalTracker.resolveCollection("m3")?.dungeonFloor)
+
+        // Thorn - F4 / M4
+        val thorn = CollectionGoalTracker.resolveCollection("thorn")
+        assertNotNull(thorn)
+        assertEquals(DungeonFloor.F4, thorn?.dungeonFloor)
+        assertEquals(DungeonFloor.F4, CollectionGoalTracker.resolveCollection("f4")?.dungeonFloor)
+        assertEquals(DungeonFloor.F4, CollectionGoalTracker.resolveCollection("m4")?.dungeonFloor)
+
+        // Livid - F5 / M5
+        val livid = CollectionGoalTracker.resolveCollection("livid")
+        assertNotNull(livid)
+        assertEquals(DungeonFloor.F5, livid?.dungeonFloor)
+        assertEquals(DungeonFloor.F5, CollectionGoalTracker.resolveCollection("f5")?.dungeonFloor)
+        assertEquals(DungeonFloor.F5, CollectionGoalTracker.resolveCollection("m5")?.dungeonFloor)
+
+        // Sadan - F6 / M6
+        val sadan = CollectionGoalTracker.resolveCollection("sadan")
+        assertNotNull(sadan)
+        assertEquals(DungeonFloor.F6, sadan?.dungeonFloor)
+        assertEquals(DungeonFloor.F6, CollectionGoalTracker.resolveCollection("f6")?.dungeonFloor)
+        assertEquals(DungeonFloor.F6, CollectionGoalTracker.resolveCollection("m6")?.dungeonFloor)
+
+        // Necron - F7 / M7
+        val necron = CollectionGoalTracker.resolveCollection("necron")
+        assertNotNull(necron)
+        assertEquals(DungeonFloor.F7, necron?.dungeonFloor)
+        assertEquals(DungeonFloor.F7, CollectionGoalTracker.resolveCollection("f7")?.dungeonFloor)
+        assertEquals(DungeonFloor.F7, CollectionGoalTracker.resolveCollection("m7")?.dungeonFloor)
+    }
+
+    @Test
+    fun testDungeonFloorByBossName() {
+        assertEquals(DungeonFloor.F1, DungeonFloor.byBossName("Bonzo"))
+        assertEquals(DungeonFloor.F1, DungeonFloor.byBossName("bonzo"))
+        assertEquals(DungeonFloor.F1, DungeonFloor.byBossName("Bonzo Collection"))
+        assertEquals(DungeonFloor.F2, DungeonFloor.byBossName("Scarf"))
+        assertEquals(DungeonFloor.F2, DungeonFloor.byBossName("scarf"))
+        assertEquals(DungeonFloor.F3, DungeonFloor.byBossName("The Professor"))
+        assertEquals(DungeonFloor.F3, DungeonFloor.byBossName("the professor"))
+        assertEquals(DungeonFloor.F3, DungeonFloor.byBossName("Professor"))
+        assertEquals(DungeonFloor.F3, DungeonFloor.byBossName("professor"))
+        assertEquals(DungeonFloor.F3, DungeonFloor.byBossName("The Professor Collection"))
+        assertEquals(DungeonFloor.F4, DungeonFloor.byBossName("Thorn"))
+        assertEquals(DungeonFloor.F5, DungeonFloor.byBossName("Livid"))
+        assertEquals(DungeonFloor.F6, DungeonFloor.byBossName("Sadan"))
+        assertEquals(DungeonFloor.F7, DungeonFloor.byBossName("Necron"))
+        assertEquals(DungeonFloor.F7, DungeonFloor.byBossName("necron"))
+        assertEquals(DungeonFloor.F7, DungeonFloor.byBossName("Necron Collection"))
+        assertEquals(DungeonFloor.F7, DungeonFloor.byBossName("f7"))
+        assertEquals(DungeonFloor.F7, DungeonFloor.byBossName("m7"))
+        assertEquals(DungeonFloor.E, DungeonFloor.byBossName("The Watcher"))
+    }
+
+    @Test
+    fun testParseBossGoalCommands() {
+        val necronResult = CollectionGoalTracker.parseGoalCommand(arrayOf("necron", "500"))
+        assertTrue(necronResult is GoalCommandResult.SetGoal)
+        val necronGoal = necronResult as GoalCommandResult.SetGoal
+        assertEquals("necron", necronGoal.entry.key)
+        assertEquals(500L, necronGoal.amount)
+
+        val f7Result = CollectionGoalTracker.parseGoalCommand(arrayOf("f7", "1000"))
+        assertTrue(f7Result is GoalCommandResult.SetGoal)
+        val f7Goal = f7Result as GoalCommandResult.SetGoal
+        assertEquals("necron", f7Goal.entry.key)
+        assertEquals(1000L, f7Goal.amount)
+
+        val profResult = CollectionGoalTracker.parseGoalCommand(arrayOf("the", "professor", "250"))
+        assertTrue(profResult is GoalCommandResult.SetGoal)
+        val profGoal = profResult as GoalCommandResult.SetGoal
+        assertEquals("professor", profGoal.entry.key)
+        assertEquals(250L, profGoal.amount)
     }
 
     @Test

@@ -6,6 +6,7 @@ import at.hannibal2.skyhanni.data.InteractClickType
 import at.hannibal2.skyhanni.data.IslandType
 import at.hannibal2.skyhanni.data.ProfileStorageData
 import at.hannibal2.skyhanni.events.BlockClickEvent
+import at.hannibal2.skyhanni.events.CollectionUpdateEvent
 import at.hannibal2.skyhanni.events.DebugDataCollectEvent
 import at.hannibal2.skyhanni.events.InventoryFullyOpenedEvent
 import at.hannibal2.skyhanni.events.ScoreboardUpdateEvent
@@ -74,7 +75,7 @@ object DungeonApi {
      */
     private val bossPattern by patternGroup.pattern(
         "boss",
-        "View all your (?<name>\\w+) Collection",
+        "View all your (?<name>.*?) Collection",
     )
 
     /**
@@ -90,7 +91,7 @@ object DungeonApi {
      */
     private val killPattern by patternGroup.pattern(
         "kill",
-        " +. Defeated (?<boss>\\w+).*",
+        " +. Defeated (?<boss>[A-Za-z ]+?)(?: in .*|!|\\.|$)",
     )
 
     /**
@@ -118,6 +119,8 @@ object DungeonApi {
     var time: String = ""
         private set
     var roomId: String? = null
+        private set
+    var bossDefeatedThisRun: Boolean = false
         private set
     val active get() = started && !completed
 
@@ -262,16 +265,16 @@ object DungeonApi {
 
     fun getLevelComponent(level: Int): Component {
         val formatting: ChatFormatting = when {
-            level >= 45 -> RED
-            level >= 40 -> GOLD
-            level >= 35 -> DARK_PURPLE
-            level >= 30 -> BLUE
-            level >= 25 -> AQUA
-            level >= 20 -> DARK_GREEN
-            level >= 15 -> GREEN
-            level >= 10 -> YELLOW
-            level >= 5 -> WHITE
-            else -> GRAY
+            level >= 45 -> ChatFormatting.RED
+            level >= 40 -> ChatFormatting.GOLD
+            level >= 35 -> ChatFormatting.DARK_PURPLE
+            level >= 30 -> ChatFormatting.BLUE
+            level >= 25 -> ChatFormatting.AQUA
+            level >= 20 -> ChatFormatting.DARK_GREEN
+            level >= 15 -> ChatFormatting.GREEN
+            level >= 10 -> ChatFormatting.YELLOW
+            level >= 5 -> ChatFormatting.WHITE
+            else -> ChatFormatting.GRAY
         }
         return componentBuilder {
             append("$level") {
@@ -351,6 +354,7 @@ object DungeonApi {
         playerTeamClasses.clear()
         time = ""
         roomId = null
+        bossDefeatedThisRun = false
         DungeonBlessings.reset()
     }
 
@@ -366,15 +370,28 @@ object DungeonApi {
         }
 
         killPattern.matchMatcher(event.cleanMessage) {
-            val bossCollections = bossStorage ?: return
-            val boss = DungeonFloor.byBossName(group("boss"))
-            if (matches() && boss != null && boss !in bossCollections) {
-                bossCollections.addOrPut(boss, 1)
+            val boss = DungeonFloor.byBossName(group("boss")) ?: getCurrentBoss()
+            if (matches() && boss != null && boss != DungeonFloor.E && !bossDefeatedThisRun) {
+                bossDefeatedThisRun = true
+                val bossCollections = bossStorage
+                if (bossCollections != null) {
+                    bossCollections.addOrPut(boss, 1)
+                    CollectionUpdateEvent.post()
+                }
             }
             return
         }
         dungeonComplete.matchMatcher(event.cleanMessage) {
             completed = true
+            val boss = getCurrentBoss()
+            if (boss != null && boss != DungeonFloor.E && !bossDefeatedThisRun) {
+                bossDefeatedThisRun = true
+                val bossCollections = bossStorage
+                if (bossCollections != null) {
+                    bossCollections.addOrPut(boss, 1)
+                    CollectionUpdateEvent.post()
+                }
+            }
             DungeonCompleteEvent(floor).post()
             return
         }
@@ -397,19 +414,27 @@ object DungeonApi {
         inventoryItems: Map<Int, SafeItemStack>,
         inventoryName: String,
     ) {
-        inventoryItems[48]?.let { item ->
-            if (item.cleanName == "Go Back") {
-                item.getCleanLore().getOrNull(0)?.let { firstLine ->
-                    if (firstLine == "To Boss Collections") {
-                        val name = inventoryName.split(" ").dropLast(1).joinToString(" ")
-                        val floor = DungeonFloor.byBossName(name) ?: return
-                        val lore = inventoryItems[4]?.getCleanLore() ?: return
-                        val line = lore.find { it.contains("Total Kills:") } ?: return
-                        val kills = totalKillsPattern.matchMatcher(line) {
-                            group("kills").formatInt()
-                        } ?: return
-                        bossCollections[floor] = kills
-                    }
+        val goBackItem = inventoryItems[48] ?: return
+        if (goBackItem.cleanName != "Go Back") return
+        val firstLine = goBackItem.getCleanLore().firstOrNull() ?: return
+        if (firstLine != "To Boss Collections") return
+
+        val name = inventoryName.removeSuffix(" Collection").trim()
+        val floor = DungeonFloor.byBossName(name) ?: return
+        val stack = inventoryItems[4] ?: return
+        val lore = stack.getCleanLore()
+
+        for (line in lore) {
+            val lower = line.lowercase()
+            if (lower.contains("total defeated:") || lower.contains("total kills:") ||
+                lower.contains("defeated:") || lower.contains("kills:")
+            ) {
+                val numberStr = line.substringAfter(":").trim().split(" ").firstOrNull()?.replace(",", "")?.takeWhile { it.isDigit() }
+                val kills = numberStr?.toIntOrNull()
+                if (kills != null) {
+                    bossCollections[floor] = kills
+                    CollectionUpdateEvent.post()
+                    return
                 }
             }
         }
@@ -419,25 +444,60 @@ object DungeonApi {
         bossCollections: MutableMap<DungeonFloor, Int>,
         inventoryItems: Map<Int, SafeItemStack>,
     ) {
-        nextItem@ for (stack in inventoryItems.values) {
-            var name = ""
-            var kills = 0
-            nextLine@ for (line in stack.getLoreComponent()) {
-                val colorlessLine = line.string.removeColor()
-                bossPattern.matchMatcher(colorlessLine) {
-                    if (matches()) {
-                        name = group("name")
+        var updated = false
+        for (stack in inventoryItems.values) {
+            val lore = stack.getCleanLore()
+            if (lore.isEmpty()) continue
+
+            var floor: DungeonFloor? = DungeonFloor.byBossName(stack.cleanName)
+            if (floor == null) {
+                for (line in lore) {
+                    bossPattern.matchMatcher(line) {
+                        floor = DungeonFloor.byBossName(group("name"))
                     }
+                    if (floor != null) break
                 }
-                levelPattern.matchMatcher(colorlessLine) {
-                    if (matches()) {
-                        kills = group("kills").toInt()
-                        break@nextLine
+            }
+            if (floor == null || floor == DungeonFloor.E) continue
+
+            var kills: Int? = null
+
+            for (line in lore) {
+                val lower = line.lowercase()
+                if (lower.contains("total defeated:") || lower.contains("total kills:") ||
+                    lower.contains("defeated:") || lower.contains("kills:")
+                ) {
+                    val numberStr = line.substringAfter(":").trim().split(" ").firstOrNull()?.replace(",", "")?.takeWhile { it.isDigit() }
+                    if (!numberStr.isNullOrEmpty()) {
+                        kills = numberStr.toIntOrNull()
+                        if (kills != null) break
                     }
                 }
             }
-            val floor = DungeonFloor.byBossName(name) ?: continue
-            bossCollections[floor] = kills
+
+            if (kills == null) {
+                for (line in lore) {
+                    val trimmed = line.trim()
+                    if (trimmed.contains("/") && trimmed.firstOrNull()?.isDigit() == true) {
+                        val numberStr = trimmed.substringBefore("/").trim().replace(",", "")
+                        kills = numberStr.toIntOrNull()
+                        if (kills != null) break
+                    }
+                    levelPattern.matchMatcher(line) {
+                        val numberStr = group("kills").replace(",", "")
+                        kills = numberStr.toIntOrNull()
+                    }
+                    if (kills != null) break
+                }
+            }
+
+            if (kills != null) {
+                bossCollections[floor] = kills
+                updated = true
+            }
+        }
+        if (updated) {
+            CollectionUpdateEvent.post()
         }
     }
 

@@ -10,6 +10,9 @@ import at.hannibal2.skyhanni.data.GuiEditManager
 import at.hannibal2.skyhanni.data.garden.CropCollectionApi.getCollection
 import at.hannibal2.skyhanni.events.CollectionUpdateEvent
 import at.hannibal2.skyhanni.events.SecondPassedEvent
+import at.hannibal2.skyhanni.events.dungeon.DungeonCompleteEvent
+import at.hannibal2.skyhanni.features.dungeon.DungeonApi
+import at.hannibal2.skyhanni.features.dungeon.DungeonFloor
 import at.hannibal2.skyhanni.features.garden.CropType
 import at.hannibal2.skyhanni.skyhannimodule.SkyHanniModule
 import at.hannibal2.skyhanni.utils.ChatUtils
@@ -60,6 +63,7 @@ object CollectionGoalTracker {
         val internalName: NeuInternalName,
         val cropType: CropType? = null,
         val aliases: List<String> = emptyList(),
+        val dungeonFloor: DungeonFloor? = null,
     )
 
     sealed class GoalCommandResult {
@@ -161,13 +165,13 @@ object CollectionGoalTracker {
         CollectionEntry("hemovibe", "Hemovibe", "HEMOVIBE".toInternalName()),
 
         // Boss Collections
-        CollectionEntry("bonzo", "Bonzo", "BONZO_FRAGMENT".toInternalName()),
-        CollectionEntry("scarf", "Scarf", "SCARF_FRAGMENT".toInternalName()),
-        CollectionEntry("professor", "Professor", "PROFESSOR_FRAGMENT".toInternalName()),
-        CollectionEntry("thorn", "Thorn", "THORN_FRAGMENT".toInternalName()),
-        CollectionEntry("livid", "Livid", "LIVID_FRAGMENT".toInternalName()),
-        CollectionEntry("sadan", "Sadan", "SADAN_FRAGMENT".toInternalName()),
-        CollectionEntry("necron", "Necron", "NECRON_HANDLE".toInternalName()),
+        CollectionEntry("bonzo", "Bonzo", "BONZO_MASK".toInternalName(), dungeonFloor = DungeonFloor.F1, aliases = listOf("f1", "m1")),
+        CollectionEntry("scarf", "Scarf", "RED_SCARF".toInternalName(), dungeonFloor = DungeonFloor.F2, aliases = listOf("f2", "m2")),
+        CollectionEntry("professor", "The Professor", "ADAPTIVE_BLADE".toInternalName(), dungeonFloor = DungeonFloor.F3, aliases = listOf("the_professor", "the professor", "f3", "m3")),
+        CollectionEntry("thorn", "Thorn", "SPIRIT_BONE".toInternalName(), dungeonFloor = DungeonFloor.F4, aliases = listOf("f4", "m4")),
+        CollectionEntry("livid", "Livid", "LIVID_DAGGER".toInternalName(), dungeonFloor = DungeonFloor.F5, aliases = listOf("f5", "m5")),
+        CollectionEntry("sadan", "Sadan", "GIANT_SWORD".toInternalName(), dungeonFloor = DungeonFloor.F6, aliases = listOf("f6", "m6")),
+        CollectionEntry("necron", "Necron", "NECRON_HANDLE".toInternalName(), dungeonFloor = DungeonFloor.F7, aliases = listOf("f7", "m7")),
     )
 
     // Pre-indexed lookup maps for O(1) matching
@@ -251,14 +255,23 @@ object CollectionGoalTracker {
             }
         }
 
-        // 2. Check CollectionApi
+        // 2. Check DungeonApi if it's a Boss Collection
+        val floor = entry.dungeonFloor ?: DungeonFloor.byBossName(entry.key)
+        if (floor != null) {
+            val bossKills = DungeonApi.bossStorage?.get(floor)?.toLong() ?: 0L
+            if (bossKills > maxAmount) {
+                maxAmount = bossKills
+            }
+        }
+
+        // 3. Check CollectionApi
         CollectionApi.getCollectionCounter(entry.internalName)?.let { counter ->
             if (counter > maxAmount) {
                 maxAmount = counter
             }
         }
 
-        // 3. Special aliases / multi-item fallback
+        // 4. Special aliases / multi-item fallback
         if (entry.key == "leather" || entry.key == "raw_beef") {
             CollectionApi.getCollectionCounter("LEATHER".toInternalName())?.let { if (it > maxAmount) maxAmount = it }
             CollectionApi.getCollectionCounter("RAW_BEEF".toInternalName())?.let { if (it > maxAmount) maxAmount = it }
@@ -629,6 +642,11 @@ object CollectionGoalTracker {
 
     @HandleEvent(CollectionUpdateEvent::class)
     fun onCollectionUpdate() {
+        update()
+    }
+
+    @HandleEvent(DungeonCompleteEvent::class)
+    fun onDungeonComplete() {
         update()
     }
 

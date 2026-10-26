@@ -1,6 +1,6 @@
 package at.hannibal2.skyhanni.features.dungeon
 
-enum class DungeonFloor(private val bossName: String) {
+enum class DungeonFloor(val bossName: String) {
     E("The Watcher"),
     F1("Bonzo"),
     F2("Scarf"),
@@ -12,6 +12,18 @@ enum class DungeonFloor(private val bossName: String) {
 
     companion object {
 
-        fun byBossName(bossName: String) = DungeonFloor.entries.firstOrNull { it.bossName == bossName }
+        fun byBossName(bossName: String): DungeonFloor? {
+            val clean = bossName.trim().lowercase()
+                .removePrefix("the ")
+                .removeSuffix(" collection")
+                .trim()
+            return entries.firstOrNull { floor ->
+                val floorBoss = floor.bossName.lowercase().removePrefix("the ").trim()
+                floor.name.lowercase() == clean ||
+                    floor.name.lowercase() == clean.replace("m", "f") ||
+                    floor.bossName.lowercase() == clean ||
+                    floorBoss == clean
+            }
+        }
     }
 }
