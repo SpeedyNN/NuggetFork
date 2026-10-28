@@ -429,7 +429,7 @@ open class SkyHanniTracker<Data : TrackerData<*>, Config : GenericIndividualTrac
             type = LocalDate::class,
             toValue = { it.yearToLocalDate() },
             fromValue = { (it as LocalDate).format(yearFormatter) }
-        )
+        ),
         ;
 
         override fun toString(): String = displayName

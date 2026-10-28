@@ -42,7 +42,8 @@ class About {
 
     enum class UpdateStream(private val label: String, val stream: String) {
         BETA("Beta", "pre"),
-        RELEASES("Full", "full");
+        RELEASES("Full", "full"),
+        ;
 
         override fun toString() = label
 
