@@ -21,3 +21,5 @@ gradle.properties
 .devauth/*
 !.devauth/config.toml
 .kotlin
+
+scratch/
