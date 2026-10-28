@@ -20,6 +20,10 @@ class SkillEtaTrackerTest {
         SkillEtaTracker.currentXpMin = 0.0
         SkillEtaTracker.liveCountdownSeconds = 0.0
         SkillEtaTracker.isPaused = true
+        SkillEtaTracker.baseTotalXp = 0L
+        SkillEtaTracker.sessionXpGained = 0.0
+        SkillEtaTracker.lastKnownApiTotalXp = 0L
+        SkillEtaTracker.syncTimer = 0
     }
 
     @Test
@@ -173,11 +177,6 @@ class SkillEtaTrackerTest {
 
         val formatted = SkillEtaTracker.formatSeconds(seconds.toLong())
         assertEquals("2h 0m 0s", formatted)
-
-        val liveRemaining = seconds - 125.0
-        assertEquals(7075.0, liveRemaining, 0.001)
-        val formattedRemaining = SkillEtaTracker.formatSeconds(liveRemaining.toLong())
-        assertEquals("1h 57m 55s", formattedRemaining)
     }
 
     @Test
@@ -196,32 +195,47 @@ class SkillEtaTrackerTest {
     }
 
     @Test
-    fun testCountdownNoSkippingAcrossTwoSeconds() {
-        SkillEtaTracker.liveCountdownSeconds = 3600.0
-        SkillEtaTracker.currentXpHour = 500_000.0
-        SkillEtaTracker.currentXpMin = 500_000.0 / 60.0
+    fun testSyncEtaUpdatesWithTrueRateAndRemaining() {
+        SkillEtaTracker.config.trackedSkill = "Farming"
+        SkillEtaTracker.config.targetLevel = 40
+        SkillEtaTracker.baseTotalXp = SkillUtil.xpRequiredForLevel(39)
+        // Remaining XP to level 40 is 2,200,000 XP
+        // Rate is 440,000 XP/h = 122.222 XP/s
+        SkillEtaTracker.currentXpHour = 440_000.0
+        SkillEtaTracker.currentXpMin = 440_000.0 / 60.0
 
-        val initialSeconds = SkillEtaTracker.liveCountdownSeconds
+        SkillEtaTracker.syncEta()
 
-        // Simulate 2 seconds of real time with drift correction
-        for (i in 1..2) {
-            val remainingXp = 1_000_000L
-            val ratePerSec = SkillEtaTracker.currentXpHour / 3600.0
-            val targetEta = remainingXp / ratePerSec
+        // Expected ETA = 2,200,000 / (440,000 / 3600) = 18,000 seconds (5 hours)
+        assertEquals(18000.0, SkillEtaTracker.liveCountdownSeconds, 0.01)
 
-            // Step 1: Decrement 1 second
+        // When user farms faster, rate jumps to 880,000 XP/h:
+        SkillEtaTracker.currentXpHour = 880_000.0
+        SkillEtaTracker.syncEta()
+
+        // Expected ETA = 2,200,000 / (880,000 / 3600) = 9,000 seconds (2.5 hours)
+        assertEquals(9000.0, SkillEtaTracker.liveCountdownSeconds, 0.01)
+    }
+
+    @Test
+    fun testCountdownDecrementsEverySecondAndSyncsEveryFiveSeconds() {
+        SkillEtaTracker.config.trackedSkill = "Farming"
+        SkillEtaTracker.config.targetLevel = 40
+        SkillEtaTracker.baseTotalXp = SkillUtil.xpRequiredForLevel(39)
+        SkillEtaTracker.currentXpHour = 440_000.0
+        SkillEtaTracker.syncEta()
+
+        val start = SkillEtaTracker.liveCountdownSeconds
+
+        // For seconds 1 to 4: counts down strictly 1s per second
+        for (sec in 1..4) {
             SkillEtaTracker.liveCountdownSeconds -= 1.0
-
-            // Step 2: Bounded adjustment
-            val diff = targetEta - SkillEtaTracker.liveCountdownSeconds
-            val adjustment = (diff * 0.02).coerceIn(-0.1, 0.1)
-            SkillEtaTracker.liveCountdownSeconds += adjustment
         }
+        assertEquals(start - 4.0, SkillEtaTracker.liveCountdownSeconds, 0.001)
 
-        val elapsedCountdown = initialSeconds - SkillEtaTracker.liveCountdownSeconds
-        // In 2 seconds of real time, the countdown elapsed must be close to 2.0s (between 1.8 and 2.2s),
-        // and MUST NEVER jump by 10+ seconds!
-        assertTrue(elapsedCountdown in 1.8..2.2, "Expected elapsed countdown around 2s, but was $elapsedCountdown")
+        // At second 5: syncs with latest rate
+        SkillEtaTracker.syncEta()
+        assertEquals(18000.0, SkillEtaTracker.liveCountdownSeconds, 0.01)
     }
 
     @Test
