@@ -91,6 +91,10 @@ class SkillProgressConfig {
     val skillETADisplayConfig: SkillETADisplayConfig = SkillETADisplayConfig()
 
     @Expose
+    @Category(name = "Skill Target ETA Tracker", desc = "Live countdown and ETA to hit your target skill level (/eta).")
+    val skillEtaTracker: SkillEtaTrackerConfig = SkillEtaTrackerConfig()
+
+    @Expose
     @ConfigLink(owner = SkillProgressConfig::class, field = "enabled")
     val displayPosition: Position = Position(384, -105)
 
