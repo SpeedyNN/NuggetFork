@@ -25,6 +25,7 @@ import at.hannibal2.skyhanni.features.garden.pests.PestType
 import at.hannibal2.skyhanni.features.garden.pests.SprayType
 import at.hannibal2.skyhanni.features.garden.tracker.FarmingProfitTracker.drawDisplay
 import at.hannibal2.skyhanni.skyhannimodule.SkyHanniModule
+import at.hannibal2.skyhanni.utils.ChatUtils
 import at.hannibal2.skyhanni.utils.ConditionalUtils
 import at.hannibal2.skyhanni.utils.ItemUtils.itemNameWithoutColor
 import at.hannibal2.skyhanni.utils.NeuInternalName
@@ -84,7 +85,7 @@ object FarmingProfitTracker : SkyHanniBucketedItemTracker<TrackedSource, Farming
     )
 
     init {
-        initRenderer({ config.position }, inOwnInventory = false, onlyOnIsland = IslandType.GARDEN) { shouldShowDisplay() }
+        initRenderer({ config.position }, inOwnInventory = true, onlyOnIsland = IslandType.GARDEN) { shouldShowDisplay() }
     }
 
     override fun startSessionUptime() {
@@ -277,6 +278,20 @@ object FarmingProfitTracker : SkyHanniBucketedItemTracker<TrackedSource, Farming
             description = "Resets the Farming Profit Tracker"
             category = CommandCategory.USERS_RESET
             simpleCallback { resetCommand() }
+        }
+        event.registerBrigadier("shpausefarmingprofittracker") {
+            aliases = listOf("shpausefarmingtracker", "shfarmingpause")
+            description = "Pauses or resumes the Farming Profit Tracker session"
+            category = CommandCategory.USERS_ACTIVE
+            simpleCallback {
+                if (isPaused()) {
+                    startSessionUptime()
+                    ChatUtils.chat("§a[Farming Profit Tracker] Session resumed!")
+                } else {
+                    pauseSessionUptime()
+                    ChatUtils.chat("§c[Farming Profit Tracker] Session paused!")
+                }
+            }
         }
     }
 }

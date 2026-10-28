@@ -262,7 +262,7 @@ object CollectionGoalTracker {
     init {
         RenderDisplayHelper(
             outsideInventory = true,
-            inOwnInventory = false,
+            inOwnInventory = true,
             condition = { SkyBlockUtils.inSkyBlock && config.enabled && (hasActiveGoal() || GuiEditManager.isInGui()) },
             onRender = {
                 val toRender = if (hasActiveGoal()) display else dummyDisplay
