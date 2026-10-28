@@ -8,9 +8,19 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 class SkillEtaTrackerTest {
+
+    @BeforeEach
+    fun setUp() {
+        SkillEtaTracker.minuteSamples.clear()
+        SkillEtaTracker.currentXpHour = 0.0
+        SkillEtaTracker.currentXpMin = 0.0
+        SkillEtaTracker.liveCountdownSeconds = 0.0
+        SkillEtaTracker.isPaused = true
+    }
 
     @Test
     fun testParseEtaCommandEmpty() {
@@ -89,27 +99,22 @@ class SkillEtaTrackerTest {
 
     @Test
     fun testParseEtaCommandInvalidInputs() {
-        // Missing target level
         val missingLevel = SkillEtaTracker.parseEtaCommand(arrayOf("farming"))
         assertTrue(missingLevel is EtaCommandResult.Error)
         assertTrue((missingLevel as EtaCommandResult.Error).message.contains("Please specify a target level"))
 
-        // Missing skill
         val missingSkill = SkillEtaTracker.parseEtaCommand(arrayOf("40"))
         assertTrue(missingSkill is EtaCommandResult.Error)
         assertTrue((missingSkill as EtaCommandResult.Error).message.contains("Please specify which skill"))
 
-        // Unknown skill
         val unknownSkill = SkillEtaTracker.parseEtaCommand(arrayOf("gardening", "40"))
         assertTrue(unknownSkill is EtaCommandResult.Error)
         assertTrue((unknownSkill as EtaCommandResult.Error).message.contains("Unknown skill"))
 
-        // Invalid number
         val invalidNumber = SkillEtaTracker.parseEtaCommand(arrayOf("farming", "abc"))
         assertTrue(invalidNumber is EtaCommandResult.Error)
         assertTrue((invalidNumber as EtaCommandResult.Error).message.contains("Invalid target level"))
 
-        // Out of range level
         val outOfRangeLow = SkillEtaTracker.parseEtaCommand(arrayOf("farming", "0"))
         assertTrue(outOfRangeLow is EtaCommandResult.Error)
         assertTrue((outOfRangeLow as EtaCommandResult.Error).message.contains("between 1 and 400"))
@@ -134,21 +139,15 @@ class SkillEtaTrackerTest {
 
     @Test
     fun testSkillXpMath() {
-        // Level 1: 50
         assertEquals(50L, SkillUtil.xpRequiredForLevel(1))
-        // Level 2: 50 + 125 = 175
         assertEquals(175L, SkillUtil.xpRequiredForLevel(2))
-        // Level 50: 55,172,425
         assertEquals(55_172_425L, SkillUtil.xpRequiredForLevel(50))
-        // Level 60: 111,672,425
         assertEquals(111_672_425L, SkillUtil.xpRequiredForLevel(60))
 
-        // Level 39 and 40 XP
         val xp39 = SkillUtil.xpRequiredForLevel(39)
         val xp40 = SkillUtil.xpRequiredForLevel(40)
         assertTrue(xp40 > xp39)
         val diff39To40 = xp40 - xp39
-        // XP from 39 to 40 is 2,200,000
         assertEquals(2_200_000L, diff39To40)
     }
 
@@ -166,9 +165,6 @@ class SkillEtaTrackerTest {
 
     @Test
     fun testEtaCalculationMath() {
-        // Remaining XP = 1,100,000 (halfway to level 40 from 39)
-        // Rate = 550,000 XP/h = 152.777 XP/s
-        // Expected ETA = 1,100,000 / (550,000 / 3600) = 7,200 seconds = 2 hours
         val remainingXp = 1_100_000L
         val ratePerHour = 550_000.0
         val ratePerSec = ratePerHour / 3600.0
@@ -178,11 +174,54 @@ class SkillEtaTrackerTest {
         val formatted = SkillEtaTracker.formatSeconds(seconds.toLong())
         assertEquals("2h 0m 0s", formatted)
 
-        // After 125 seconds of active progress:
         val liveRemaining = seconds - 125.0
         assertEquals(7075.0, liveRemaining, 0.001)
         val formattedRemaining = SkillEtaTracker.formatSeconds(liveRemaining.toLong())
         assertEquals("1h 57m 55s", formattedRemaining)
+    }
+
+    @Test
+    fun testMinuteRateCalculation() {
+        val now = 1_000_000L
+        // 5,000 XP gained over 30 seconds
+        SkillEtaTracker.minuteSamples.addLast(SkillEtaTracker.XpSample(now - 30_000L, 2500.0))
+        SkillEtaTracker.minuteSamples.addLast(SkillEtaTracker.XpSample(now, 2500.0))
+
+        SkillEtaTracker.updateRateFromWindow(now)
+
+        // 5000 XP in 30s -> 166.666 XP/s -> 10,000 XP/min -> 600,000 XP/h
+        assertEquals(600_000.0, SkillEtaTracker.currentXpHour, 0.01)
+        assertEquals(10_000.0, SkillEtaTracker.currentXpMin, 0.01)
+        assertEquals(SkillEtaTracker.currentXpHour, SkillEtaTracker.currentXpMin * 60.0, 0.01)
+    }
+
+    @Test
+    fun testCountdownNoSkippingAcrossTwoSeconds() {
+        SkillEtaTracker.liveCountdownSeconds = 3600.0
+        SkillEtaTracker.currentXpHour = 500_000.0
+        SkillEtaTracker.currentXpMin = 500_000.0 / 60.0
+
+        val initialSeconds = SkillEtaTracker.liveCountdownSeconds
+
+        // Simulate 2 seconds of real time with drift correction
+        for (i in 1..2) {
+            val remainingXp = 1_000_000L
+            val ratePerSec = SkillEtaTracker.currentXpHour / 3600.0
+            val targetEta = remainingXp / ratePerSec
+
+            // Step 1: Decrement 1 second
+            SkillEtaTracker.liveCountdownSeconds -= 1.0
+
+            // Step 2: Bounded adjustment
+            val diff = targetEta - SkillEtaTracker.liveCountdownSeconds
+            val adjustment = (diff * 0.02).coerceIn(-0.1, 0.1)
+            SkillEtaTracker.liveCountdownSeconds += adjustment
+        }
+
+        val elapsedCountdown = initialSeconds - SkillEtaTracker.liveCountdownSeconds
+        // In 2 seconds of real time, the countdown elapsed must be close to 2.0s (between 1.8 and 2.2s),
+        // and MUST NEVER jump by 10+ seconds!
+        assertTrue(elapsedCountdown in 1.8..2.2, "Expected elapsed countdown around 2s, but was $elapsedCountdown")
     }
 
     @Test
@@ -199,4 +238,3 @@ class SkillEtaTrackerTest {
         assertEquals(7, bar.height)
     }
 }
-

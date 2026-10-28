@@ -45,14 +45,15 @@ object SkillEtaTracker {
         data class Error(val message: String) : EtaCommandResult()
     }
 
-    private val recentSamples = ArrayDeque<XpSample>()
+    val minuteSamples = ArrayDeque<XpSample>()
+    var currentXpMin: Double = 0.0
     var currentXpHour: Double = 0.0
+    var liveCountdownSeconds: Double = 0.0
     var isPaused: Boolean = true
-    private var baseRemainingSeconds: Double = 0.0
-    private var baseTimestamp: Long = 0L
-    private var frozenRemainingSeconds: Double = 0.0
     var lastXpGainTime = SimpleTimeMark.farPast()
     var hasAnnouncedCompletion: Boolean = false
+    var baseTotalXp: Long = 0L
+    var sessionXpGained: Double = 0.0
 
     private var display = listOf<Renderable>()
     private var dummyDisplay = listOf<Renderable>()
@@ -137,13 +138,18 @@ object SkillEtaTracker {
     }
 
     fun getCurrentTotalXp(skill: SkillType): Long {
-        val info = SkillUtil.getSkillInfo(skill) ?: return 0L
-        if (info.totalXp > 0L) return info.totalXp
-        val lvl = if (info.overflowLevel > 0) info.overflowLevel else info.level
-        if (lvl > 0) {
-            return SkillUtil.xpRequiredForLevel(lvl) + info.currentXp
-        }
-        return info.currentXp
+        val info = SkillUtil.getSkillInfo(skill)
+        val infoXp = if (info != null) {
+            if (info.totalXp > 0L) info.totalXp
+            else {
+                val lvl = if (info.overflowLevel > 0) info.overflowLevel else info.level
+                if (lvl > 0) SkillUtil.xpRequiredForLevel(lvl) + info.currentXp
+                else info.currentXp
+            }
+        } else 0L
+
+        val tracked = baseTotalXp + sessionXpGained.toLong()
+        return maxOf(infoXp, tracked)
     }
 
     fun getCurrentLevel(skill: SkillType): Int {
@@ -164,9 +170,7 @@ object SkillEtaTracker {
         if (!hasActiveGoal()) return 0.0
         val skill = getTrackedSkill() ?: return 0.0
         if (getCurrentTotalXp(skill) >= getTargetTotalXp(config.targetLevel)) return 0.0
-        if (isPaused) return frozenRemainingSeconds
-        val elapsed = (System.currentTimeMillis() - baseTimestamp) / 1000.0
-        return (baseRemainingSeconds - elapsed).coerceAtLeast(0.0)
+        return liveCountdownSeconds.coerceAtLeast(0.0)
     }
 
     fun formatSeconds(totalSeconds: Long): String {
@@ -235,6 +239,8 @@ object SkillEtaTracker {
                 config.startTotalXp = getCurrentTotalXp(result.skill)
                 config.enabled = true
                 hasAnnouncedCompletion = false
+                baseTotalXp = getCurrentTotalXp(result.skill)
+                sessionXpGained = 0.0
                 resetRate()
                 updateDisplay()
 
@@ -264,14 +270,15 @@ object SkillEtaTracker {
                     val target = config.targetLevel
                     val current = getCurrentLevel(skill)
                     val remaining = getRemainingXp(skill, target)
-                    val rate = currentXpHour.toLong()
+                    val rateHour = currentXpHour.toLong()
+                    val rateMin = currentXpMin.toLong()
                     val liveSecs = getLiveSecondsRemaining().toLong()
-                    val etaFormatted = if (rate > 0) formatSeconds(liveSecs) else "Waiting for XP..."
-                    val pauseStatus = if (isPaused && rate > 0) " §c(PAUSED)" else ""
+                    val etaFormatted = if (rateHour > 0) formatSeconds(liveSecs) else "Waiting for XP..."
+                    val pauseStatus = if (isPaused && rateHour > 0) " §c(PAUSED)" else ""
 
                     ChatUtils.chat("§a[Skill ETA] Currently tracking §b${skill.displayName} §8(Level $current ➜ $target)§7:")
                     ChatUtils.chat("  §7- Remaining XP: §e${remaining.addSeparators()}")
-                    ChatUtils.chat("  §7- Current Rate: §e${if (rate > 0) "${rate.addSeparators()} XP/h" else "N/A"}")
+                    ChatUtils.chat("  §7- Current Rate: §e${if (rateHour > 0) "${rateHour.addSeparators()} XP/h (${rateMin.addSeparators()}/min)" else "N/A"}")
                     ChatUtils.chat("  §7- Live Countdown ETA: §b$etaFormatted$pauseStatus")
                     ChatUtils.clickableChat("§c[✕ Clear Active Goal]", onClick = {
                         clearGoal()
@@ -296,19 +303,53 @@ object SkillEtaTracker {
         config.startLevel = 0
         config.startTotalXp = 0L
         hasAnnouncedCompletion = false
+        baseTotalXp = 0L
+        sessionXpGained = 0.0
         resetRate()
         display = emptyList()
         updateDisplay()
     }
 
     fun resetRate() {
-        recentSamples.clear()
+        minuteSamples.clear()
+        currentXpMin = 0.0
         currentXpHour = 0.0
+        liveCountdownSeconds = 0.0
         isPaused = true
-        baseRemainingSeconds = 0.0
-        frozenRemainingSeconds = 0.0
-        baseTimestamp = System.currentTimeMillis()
         lastXpGainTime = SimpleTimeMark.farPast()
+    }
+
+    fun updateRateFromWindow(now: Long = System.currentTimeMillis()) {
+        while (minuteSamples.isNotEmpty() && now - minuteSamples.first().timestamp > 60_000L) {
+            minuteSamples.removeFirst()
+        }
+
+        if (minuteSamples.size < 2) return
+
+        val oldest = minuteSamples.first().timestamp
+        val windowDurationSec = ((now - oldest) / 1000.0).coerceAtLeast(1.0)
+        if (windowDurationSec < 3.0) return
+
+        val totalGainedInWindow = minuteSamples.sumOf { it.amount }
+        val xpPerSec = totalGainedInWindow / windowDurationSec
+        val calculatedXpMin = xpPerSec * 60.0
+        val calculatedXpHour = calculatedXpMin * 60.0
+
+        if (currentXpHour <= 0.0) {
+            currentXpHour = calculatedXpHour
+            currentXpMin = calculatedXpMin
+            val activeSkill = getTrackedSkill()
+            if (activeSkill != null && config.targetLevel > 0) {
+                val remaining = getRemainingXp(activeSkill, config.targetLevel)
+                if (xpPerSec > 0.0) {
+                    liveCountdownSeconds = (remaining / xpPerSec).coerceAtLeast(0.0)
+                }
+            }
+        } else {
+            val alpha = 0.12
+            currentXpHour = currentXpHour * (1.0 - alpha) + calculatedXpHour * alpha
+            currentXpMin = currentXpHour / 60.0
+        }
     }
 
     fun createProgressBar(progress: Double, width: Int, height: Int, isComplete: Boolean, isPausedState: Boolean): Renderable =
@@ -343,6 +384,7 @@ object SkillEtaTracker {
         currentTotalXp: Long,
         currentLvl: Int,
         ratePerHour: Double,
+        ratePerMin: Double,
         liveSecondsRemaining: Double,
         isPausedState: Boolean,
         isDummy: Boolean = false,
@@ -372,7 +414,7 @@ object SkillEtaTracker {
         }
         headerElements.add(Renderable.text(titleText, horizontalAlign = RenderUtils.HorizontalAlignment.CENTER))
 
-        val isInGui = MinecraftCompat.screen?.let { it !is ChatScreen } ?: false
+        val isInGui = runCatching { MinecraftCompat.screen?.let { it !is ChatScreen } }.getOrNull() ?: false
         if (isInGui && !isDummy) {
             val removeButton = Renderable.clickable(
                 Renderable.text("§c ✕"),
@@ -417,7 +459,8 @@ object SkillEtaTracker {
             "§6Target Total XP: §b${targetTotalXp.addSeparators()}",
             "§6Remaining XP: §e${remainingXp.addSeparators()}",
             "§6Progress: §a${"%.1f%%".format(percent)}",
-            "§6Rate: §e${if (ratePerHour > 0) "${ratePerHour.toLong().addSeparators()} XP/h" else "N/A"}",
+            "§6XP per Minute: §b${if (ratePerMin > 0) "${ratePerMin.toLong().addSeparators()} XP/min" else "N/A"}",
+            "§6XP per Hour: §e${if (ratePerHour > 0) "${ratePerHour.toLong().addSeparators()} XP/h" else "N/A"}",
             "§6Estimated Time: §b${if (ratePerHour > 0) formatSeconds(liveSecondsRemaining.toLong()) else "Waiting for XP..."}",
         )
         list.add(Renderable.hoverTips(bar, barTips))
@@ -434,9 +477,9 @@ object SkillEtaTracker {
         val etaFormatted = formatSeconds(liveSecondsRemaining.toLong())
         val paceLine = when {
             isComplete -> "§6✔ Level $targetLevel Reached!"
-            ratePerHour <= 0.0 -> "§7XP/h: §cN/A §7| ETA: §7Waiting for XP..."
-            isPausedState -> "§7XP/h: §e${ratePerHour.toLong().addSeparators()} §7| ETA: §cPaused ($etaFormatted)"
-            else -> "§7XP/h: §e${ratePerHour.toLong().addSeparators()} §7| ETA: §b$etaFormatted"
+            ratePerHour <= 0.0 -> "§7Pace: §eCalculating... §7| ETA: §7Waiting for XP..."
+            isPausedState -> "§7XP/h: §e${ratePerHour.toLong().addSeparators()} §7(§b${ratePerMin.toLong().addSeparators()}/min§7) §7| ETA: §cPaused ($etaFormatted)"
+            else -> "§7XP/h: §e${ratePerHour.toLong().addSeparators()} §7(§b${ratePerMin.toLong().addSeparators()}/min§7) §7| ETA: §a$etaFormatted"
         }
 
         val paceRenderable = if (!isDummy) {
@@ -477,6 +520,7 @@ object SkillEtaTracker {
                 currentTotalXp = currentTotalXp,
                 currentLvl = currentLvl,
                 ratePerHour = currentXpHour,
+                ratePerMin = currentXpMin,
                 liveSecondsRemaining = liveSecs,
                 isPausedState = isPaused,
                 isDummy = false,
@@ -499,6 +543,7 @@ object SkillEtaTracker {
                 currentTotalXp = currentXp,
                 currentLvl = 39,
                 ratePerHour = 450_000.0,
+                ratePerMin = 7_500.0,
                 liveSecondsRemaining = 6160.0,
                 isPausedState = false,
                 isDummy = true,
@@ -515,33 +560,20 @@ object SkillEtaTracker {
         lastXpGainTime = SimpleTimeMark.now()
         isPaused = false
 
-        recentSamples.addLast(XpSample(now, event.gained))
-
-        // Keep rolling samples within 45 seconds
-        while (recentSamples.isNotEmpty() && now - recentSamples.first().timestamp > 45_000L) {
-            recentSamples.removeFirst()
+        sessionXpGained += event.gained
+        if (event.totalXp != null && event.totalXp > 0) {
+            baseTotalXp = event.totalXp.toLong()
+            sessionXpGained = 0.0
         }
 
-        if (recentSamples.size >= 2) {
-            val timeSpan = (now - recentSamples.first().timestamp) / 1000.0
-            if (timeSpan >= 2.0) {
-                val totalGained = recentSamples.sumOf { it.amount }
-                currentXpHour = (totalGained / timeSpan) * 3600.0
-            }
+        minuteSamples.addLast(XpSample(now, event.gained))
+
+        // Keep 60 seconds of samples for 1-minute rate calculation
+        while (minuteSamples.isNotEmpty() && now - minuteSamples.first().timestamp > 60_000L) {
+            minuteSamples.removeFirst()
         }
 
-        // Recalculate live countdown baseline
-        val targetXp = getTargetTotalXp(config.targetLevel)
-        val currentXp = getCurrentTotalXp(activeSkill)
-        val remaining = (targetXp - currentXp).coerceAtLeast(0L)
-        val ratePerSec = currentXpHour / 3600.0
-
-        if (ratePerSec > 0.0 && remaining > 0L) {
-            baseRemainingSeconds = remaining / ratePerSec
-            baseTimestamp = now
-            frozenRemainingSeconds = baseRemainingSeconds
-        }
-
+        updateRateFromWindow(now)
         updateDisplay()
     }
 
@@ -550,19 +582,45 @@ object SkillEtaTracker {
         if (!hasActiveGoal()) return
         val activeSkill = getTrackedSkill() ?: return
 
-        // Pause check
+        val now = System.currentTimeMillis()
+
+        // 1. Pause check
         if (lastXpGainTime.passedSince() > config.pauseTimeoutSeconds.seconds) {
             if (!isPaused) {
-                frozenRemainingSeconds = getLiveSecondsRemaining()
                 isPaused = true
                 updateDisplay()
             }
         } else {
-            // Live countdown tick
+            isPaused = false
+
+            // Update rate from 1-minute window
+            updateRateFromWindow(now)
+
+            // 2. LIVE COUNTDOWN: Strictly decrement by 1 second each second of real time!
+            if (liveCountdownSeconds > 0.0) {
+                liveCountdownSeconds = (liveCountdownSeconds - 1.0).coerceAtLeast(0.0)
+            }
+
+            // 3. Gentle bounded drift correction towards true target ETA
+            if (currentXpHour > 0.0) {
+                val remainingXp = getRemainingXp(activeSkill, config.targetLevel)
+                val ratePerSec = currentXpHour / 3600.0
+                if (ratePerSec > 0.0) {
+                    val targetEtaSeconds = remainingXp / ratePerSec
+                    if (liveCountdownSeconds <= 0.0) {
+                        liveCountdownSeconds = targetEtaSeconds
+                    } else {
+                        val diff = targetEtaSeconds - liveCountdownSeconds
+                        val adjustment = (diff * 0.02).coerceIn(-0.1, 0.1)
+                        liveCountdownSeconds = (liveCountdownSeconds + adjustment).coerceAtLeast(0.0)
+                    }
+                }
+            }
+
             updateDisplay()
         }
 
-        // Check if goal reached
+        // 4. Completion check
         val targetXp = getTargetTotalXp(config.targetLevel)
         val currentXp = getCurrentTotalXp(activeSkill)
         if (currentXp >= targetXp && targetXp > 0L && !hasAnnouncedCompletion) {
@@ -597,4 +655,3 @@ object SkillEtaTracker {
         }
     }
 }
-
